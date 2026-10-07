@@ -17,7 +17,8 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -84,6 +85,49 @@ def create_app(
                 "patients": [{"name": p["name"], "dob": p["dob"]} for p in clinic.patients.values()],
             }
         return out
+
+    audio_types = {
+        "audio/webm": "webm",
+        "audio/ogg": "ogg",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+    }
+    # Bias the transcriber toward words that matter here: provider names and identity details are
+    # exactly what speech-to-text gets wrong, and a misheard DOB fails verification.
+    vocab = (
+        "A patient calling a clinic to book, move or cancel an appointment. Providers: "
+        + ", ".join(p["name"] for p in clinic.list_providers())
+        + ". The caller may give their full name and date of birth."
+    )
+
+    @app.post("/api/transcribe")
+    async def transcribe(request: Request) -> dict:
+        """Raw audio body (e.g. audio/webm from the browser's MediaRecorder) -> {"text": transcript}."""
+        kind = request.headers.get("content-type", "").split(";")[0].strip()
+        if kind not in audio_types:
+            raise HTTPException(415, f"unsupported audio type {kind!r}")
+        audio = await request.body()
+        if not audio:
+            raise HTTPException(422, "empty recording")
+        if len(audio) > settings.max_audio_bytes:
+            raise HTTPException(413, "recording too long")
+        started = time.perf_counter()
+        try:
+            result = await run_in_threadpool(
+                get_client().audio.transcriptions.create,
+                model=settings.transcribe_model,
+                file=(f"speech.{audio_types[kind]}", audio, kind),
+                prompt=vocab,
+            )
+        except Exception as e:  # noqa: BLE001 - report a clean error; the patient can type instead
+            log_event(log, "transcribe_error", error_type=type(e).__name__)
+            raise HTTPException(502, "could not transcribe that; please try again or type") from None
+        text = (getattr(result, "text", "") or "").strip()
+        log_event(
+            log, "transcribe", bytes=len(audio), chars=len(text), ms=round((time.perf_counter() - started) * 1000, 1)
+        )
+        return {"text": text}
 
     @app.post("/api/session")
     def new_session() -> dict:

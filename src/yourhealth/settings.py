@@ -35,6 +35,10 @@ class Settings(BaseModel):
     # Conversation limits
     max_turns: int = Field(40, ge=1)
     max_message_chars: int = Field(2000, ge=1)
+    # Voice input: audio is transcribed server-side by the same provider as the agent (one vendor
+    # for patient data), never stored, and only its size and timing are logged.
+    transcribe_model: str = "gpt-4o-mini-transcribe"
+    max_audio_bytes: int = Field(8_000_000, ge=1)
     # Web server
     host: str = "127.0.0.1"
     port: int = 8000
@@ -55,6 +59,7 @@ class Settings(BaseModel):
             "llm_max_retries": env.get("LLM_MAX_RETRIES"),
             "turn_deadline_s": env.get("TURN_DEADLINE_S"),
             "max_turns": env.get("MAX_TURNS"),
+            "transcribe_model": env.get("TRANSCRIBE_MODEL"),
             "host": env.get("HOST"),
             "port": env.get("PORT"),
             "max_sessions": env.get("MAX_SESSIONS"),

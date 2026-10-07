@@ -1,5 +1,7 @@
 """Web API tests with a scripted LLM: no network, no key."""
 
+from types import SimpleNamespace as NS
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -170,3 +172,45 @@ def test_stream_sends_reply_sentences_as_deltas():
         ("delta", {"text": "How can I help?"}),
         ("done", {"reply": "Hello. How can I help?", "ended": False}),
     ]
+
+
+# ---- voice input ------------------------------------------------------------------
+
+
+class FakeTranscriber:
+    def __init__(self, text="I'd like to book a checkup with Dr Rao", fail=False):
+        self.calls = []
+        self.fail, self.text = fail, text
+        self.audio = NS(transcriptions=NS(create=self._create))
+
+    def _create(self, **kw):
+        self.calls.append(kw)
+        if self.fail:
+            raise RuntimeError("provider down")
+        return NS(text=f"  {self.text}  ")
+
+
+def voice_client(**kw):
+    t = FakeTranscriber(**kw)
+    return TestClient(create_app(Settings(demo_mode=False, max_audio_bytes=100), client=t)), t
+
+
+def test_transcribe_returns_text_and_biases_vocabulary():
+    c, t = voice_client()
+    r = c.post("/api/transcribe", content=b"fake-webm-bytes", headers={"Content-Type": "audio/webm;codecs=opus"})
+    assert r.status_code == 200 and r.json() == {"text": "I'd like to book a checkup with Dr Rao"}
+    call = t.calls[0]
+    assert call["file"][0] == "speech.webm" and "Dr. Anita Rao" in call["prompt"]
+
+
+def test_transcribe_rejects_bad_input():
+    c, _ = voice_client()
+    assert c.post("/api/transcribe", content=b"x", headers={"Content-Type": "text/plain"}).status_code == 415
+    assert c.post("/api/transcribe", content=b"", headers={"Content-Type": "audio/webm"}).status_code == 422
+    assert c.post("/api/transcribe", content=b"x" * 101, headers={"Content-Type": "audio/webm"}).status_code == 413
+
+
+def test_transcribe_provider_failure_is_a_clean_error():
+    c, _ = voice_client(fail=True)
+    r = c.post("/api/transcribe", content=b"audio", headers={"Content-Type": "audio/webm"})
+    assert r.status_code == 502 and "type" in r.json()["detail"]
