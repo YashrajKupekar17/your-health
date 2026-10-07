@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-
-from .agent import Agent
 import os
 
+from .agent import Agent
 from .logs import configure_logging
 from .settings import load_env
 
@@ -37,7 +36,9 @@ def main() -> None:
         reply = agent.respond(text)
         if args.debug:
             for entry in s.tool_log[seen:]:
-                print(f"{DIM}  [{entry['tool']}] {json.dumps(entry['args'])} -> {json.dumps(entry['result'])[:300]}{RESET}")
+                print(
+                    f"{DIM}  [{entry['tool']}] {json.dumps(entry['args'])} -> {json.dumps(entry['result'])[:300]}{RESET}"
+                )
             pending = s.pending.summary if s.pending else None
             print(f"{DIM}  state: turn={s.turn} patient={s.patient_id} pending={pending} handoff={s.handoff}{RESET}")
         print(f"{CYAN}agent>{RESET} {reply}")

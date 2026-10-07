@@ -37,7 +37,9 @@ def parse_slot_id(sid: str) -> tuple[str, datetime]:
         provider_id, day, hhmm = sid.split("-")
         return provider_id, datetime.strptime(day + hhmm, "%Y%m%d%H%M")
     except ValueError:
-        raise ClinicError("invalid_slot", f"'{sid}' is not a valid slot id. Use an id returned by search_slots.")
+        raise ClinicError(
+            "invalid_slot", f"'{sid}' is not a valid slot id. Use an id returned by search_slots."
+        ) from None
 
 
 def normalize_name(name: str) -> str:
@@ -53,6 +55,7 @@ def _locked(method):
     def wrapper(self, *args, **kwargs):
         with self._lock:
             return method(self, *args, **kwargs)
+
     return wrapper
 
 
@@ -62,7 +65,9 @@ class Clinic:
         data = copy.deepcopy(data)  # each session gets its own world
         self.name = data["clinic_name"]
         self.now = datetime.fromisoformat(data["now"])
-        self.horizon_end = datetime.combine(self.now.date() + timedelta(days=data["booking_horizon_days"]), datetime.min.time())
+        self.horizon_end = datetime.combine(
+            self.now.date() + timedelta(days=data["booking_horizon_days"]), datetime.min.time()
+        )
         self.change_cutoff = timedelta(hours=data["change_cutoff_hours"])
         self.providers = {p["id"]: p for p in data["providers"]}
         self.patients = {p["id"]: p for p in data["patients"]}
@@ -131,8 +136,15 @@ class Clinic:
         }
 
     @_locked
-    def search_slots(self, date_from: date, date_to: date, provider_id: str | None = None,
-                     specialty: str | None = None, part_of_day: str | None = None, limit: int = 8) -> dict:
+    def search_slots(
+        self,
+        date_from: date,
+        date_to: date,
+        provider_id: str | None = None,
+        specialty: str | None = None,
+        part_of_day: str | None = None,
+        limit: int = 8,
+    ) -> dict:
         if provider_id is not None and provider_id not in self.providers:
             raise ClinicError("unknown_provider", f"No provider with id '{provider_id}'. Use list_providers.")
         pids = [p["provider_id"] for p in self.list_providers(specialty) if provider_id in (None, p["provider_id"])]
@@ -155,9 +167,13 @@ class Clinic:
 
     @_locked
     def upcoming_appointments(self, patient_id: str) -> list[dict]:
-        mine = [a for a in self.appointments.values()
-                if a["patient_id"] == patient_id and a["status"] == "booked"
-                and datetime.fromisoformat(a["start"]) > self.now]
+        mine = [
+            a
+            for a in self.appointments.values()
+            if a["patient_id"] == patient_id
+            and a["status"] == "booked"
+            and datetime.fromisoformat(a["start"]) > self.now
+        ]
         return [self.describe_appointment(a) for a in sorted(mine, key=lambda a: a["start"])]
 
     def describe_appointment(self, a: dict) -> dict:
@@ -176,8 +192,11 @@ class Clinic:
         provider_id, start = parse_slot_id(sid)
         if not self._is_free(provider_id, start):
             raise ClinicError("slot_unavailable", "That slot is not available. Search again and offer real options.")
-        clash = [a for a in self.appointments.values()
-                 if a["patient_id"] == patient_id and a["status"] == "booked" and a["start"] == f"{start:%Y-%m-%dT%H:%M}"]
+        clash = [
+            a
+            for a in self.appointments.values()
+            if a["patient_id"] == patient_id and a["status"] == "booked" and a["start"] == f"{start:%Y-%m-%dT%H:%M}"
+        ]
         if clash:
             raise ClinicError("patient_double_booked", "The patient already has an appointment at that time.")
         return provider_id, start
@@ -187,7 +206,9 @@ class Clinic:
         a = self.appointments.get(appointment_id)
         # Same error whether it does not exist or belongs to someone else: no leaking.
         if a is None or a["patient_id"] != patient_id or a["status"] != "booked":
-            raise ClinicError("appointment_not_found", "No such upcoming appointment for this patient. Use list_my_appointments.")
+            raise ClinicError(
+                "appointment_not_found", "No such upcoming appointment for this patient. Use list_my_appointments."
+            )
         start = datetime.fromisoformat(a["start"])
         if start <= self.now:
             raise ClinicError("appointment_not_found", "That appointment is in the past.")
@@ -205,8 +226,14 @@ class Clinic:
     def book(self, patient_id: str, sid: str, reason: str) -> dict:
         provider_id, start = self.check_bookable(patient_id, sid)
         new_id = f"A{1001 + len(self.appointments)}"
-        a = {"id": new_id, "patient_id": patient_id, "provider_id": provider_id,
-             "start": f"{start:%Y-%m-%dT%H:%M}", "reason": reason, "status": "booked"}
+        a = {
+            "id": new_id,
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "start": f"{start:%Y-%m-%dT%H:%M}",
+            "reason": reason,
+            "status": "booked",
+        }
         self.appointments[new_id] = a
         return a
 

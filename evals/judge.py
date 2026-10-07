@@ -46,16 +46,27 @@ def _render(trace: dict) -> str:
 
 def judge_trial(sc: Scenario, trace: dict, client: OpenAI, model: str) -> dict:
     criteria = sc.judge or ["(no assistant criteria for this scenario; return an empty list)"]
-    prompt = _PROMPT.format(card=json.dumps(sc.patient, default=str), conversation=_render(trace),
-                            criteria="\n".join(f"- {c}" for c in criteria))
+    prompt = _PROMPT.format(
+        card=json.dumps(sc.patient, default=str),
+        conversation=_render(trace),
+        criteria="\n".join(f"- {c}" for c in criteria),
+    )
     try:
-        raw = client.chat.completions.create(
-            model=model, temperature=0, response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": prompt}],
-        ).choices[0].message.content
+        raw = (
+            client.chat.completions.create(
+                model=model,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            .choices[0]
+            .message.content
+        )
         out = json.loads(raw)
-        return {"criteria": out.get("criteria", []) if sc.judge else [],
-                "patient_followed_card": bool(out.get("patient_followed_card", True)),
-                "patient_note": out.get("patient_note", "")}
-    except Exception as e:  # the judge is advisory; its failure must not sink the run
+        return {
+            "criteria": out.get("criteria", []) if sc.judge else [],
+            "patient_followed_card": bool(out.get("patient_followed_card", True)),
+            "patient_note": out.get("patient_note", ""),
+        }
+    except Exception as e:  # noqa: BLE001 - the judge is advisory; its failure must not sink the run
         return {"criteria": [], "patient_followed_card": True, "patient_note": f"judge error: {e}"}

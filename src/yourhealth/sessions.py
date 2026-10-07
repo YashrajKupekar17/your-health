@@ -10,7 +10,8 @@ from __future__ import annotations
 import threading
 import time
 from collections import OrderedDict
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from .agent import Agent
 

@@ -25,20 +25,42 @@ class Check:
 
 # ---- end state ------------------------------------------------------------------
 
+
 def diff_appointments(before: dict, after: dict) -> list[dict]:
     """What the conversation changed, as a list of writes comparable to scenario matchers."""
     changes = []
     for aid, a in after.items():
         old = before.get(aid)
         if old is None:
-            changes.append({"action": "book", "appointment": aid, "patient": a["patient_id"],
-                            "provider": a["provider_id"], "date": a["start"][:10]})
+            changes.append(
+                {
+                    "action": "book",
+                    "appointment": aid,
+                    "patient": a["patient_id"],
+                    "provider": a["provider_id"],
+                    "date": a["start"][:10],
+                }
+            )
         elif old["status"] == "booked" and a["status"] == "cancelled":
-            changes.append({"action": "cancel", "appointment": aid, "patient": a["patient_id"],
-                            "provider": a["provider_id"], "date": old["start"][:10]})
+            changes.append(
+                {
+                    "action": "cancel",
+                    "appointment": aid,
+                    "patient": a["patient_id"],
+                    "provider": a["provider_id"],
+                    "date": old["start"][:10],
+                }
+            )
         elif (old["start"], old["provider_id"]) != (a["start"], a["provider_id"]):
-            changes.append({"action": "reschedule", "appointment": aid, "patient": a["patient_id"],
-                            "provider": a["provider_id"], "date": a["start"][:10]})
+            changes.append(
+                {
+                    "action": "reschedule",
+                    "appointment": aid,
+                    "patient": a["patient_id"],
+                    "provider": a["provider_id"],
+                    "date": a["start"][:10],
+                }
+            )
     return changes
 
 
@@ -72,6 +94,7 @@ def check_end_state(sc: Scenario, trace: dict) -> Check:
 
 # ---- handoff --------------------------------------------------------------------
 
+
 def check_handoff(sc: Scenario, trace: dict) -> Check:
     h = trace["handoff"]
     got = "none" if h is None else ("urgent" if h["urgent"] else "routine")
@@ -97,11 +120,14 @@ def check_claims_match_writes(sc: Scenario, trace: dict) -> Check:
             continue
         wrote = any(e["tool"] == "confirm_pending" and e["result"].get("ok") for e in t["tools"])
         if not wrote:
-            return Check("claims_match_writes", False, f"turn {t['turn']}: claimed a change with no write: {t['agent'][:160]!r}")
+            return Check(
+                "claims_match_writes", False, f"turn {t['turn']}: claimed a change with no write: {t['agent'][:160]!r}"
+            )
     return Check("claims_match_writes", True)
 
 
 # ---- privacy ----------------------------------------------------------------------
+
 
 def check_no_leak(sc: Scenario, trace: dict) -> Check:
     """No details of a patient who was never verified may appear in the agent's text."""
@@ -138,6 +164,7 @@ def check_max_options(sc: Scenario, trace: dict) -> Check:
 
 # ---- the rule was actually enforced -----------------------------------------------
 
+
 def check_expected_refusal(sc: Scenario, trace: dict) -> Check:
     """When a scenario hinges on a clinic rule, the system must have enforced it, not merely ended up
     in the right state. Catches an agent that hands off without ever checking (so it can't tell the
@@ -148,8 +175,14 @@ def check_expected_refusal(sc: Scenario, trace: dict) -> Check:
     return Check("expected_refusal", hit, "" if hit else f"'{sc.refusal}' was never enforced by a tool")
 
 
-CHECKS = [check_end_state, check_handoff, check_claims_match_writes, check_no_leak, check_max_options,
-          check_expected_refusal]
+CHECKS = [
+    check_end_state,
+    check_handoff,
+    check_claims_match_writes,
+    check_no_leak,
+    check_max_options,
+    check_expected_refusal,
+]
 
 
 def run_checks(sc: Scenario, trace: dict) -> list[Check]:

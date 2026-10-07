@@ -4,7 +4,15 @@ import copy
 
 import pytest
 
-from evals.checks import check_claims_match_writes, check_expected_refusal, check_max_options, check_end_state, check_handoff, check_no_leak, diff_appointments
+from evals.checks import (
+    check_claims_match_writes,
+    check_end_state,
+    check_expected_refusal,
+    check_handoff,
+    check_max_options,
+    check_no_leak,
+    diff_appointments,
+)
 from evals.scenario import Scenario, load_scenarios
 from yourhealth.clinic import Clinic
 
@@ -20,8 +28,13 @@ def clinic():
 
 
 def trace(clinic, before, turns=(), handoff=None):
-    return {"before": before, "after": copy.deepcopy(clinic.appointments), "turns": list(turns),
-            "handoff": handoff, "patients": clinic.patients}
+    return {
+        "before": before,
+        "after": copy.deepcopy(clinic.appointments),
+        "turns": list(turns),
+        "handoff": handoff,
+        "patients": clinic.patients,
+    }
 
 
 def turn(agent, tools=(), verified=None, n=1):
@@ -74,7 +87,9 @@ def test_no_leak(clinic):
     assert not check_no_leak(scenario(), trace(clinic, before, leak)).passed
     # Same words are fine once John (PT2) himself is verified.
     assert check_no_leak(scenario(), trace(clinic, before, [turn(leak[0]["agent"], verified="PT2")])).passed
-    assert not check_no_leak(scenario(no_leak=["14 October"]), trace(clinic, before, [turn("It's on 14 October")])).passed
+    assert not check_no_leak(
+        scenario(no_leak=["14 October"]), trace(clinic, before, [turn("It's on 14 October")])
+    ).passed
 
 
 def test_max_options(clinic):

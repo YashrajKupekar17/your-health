@@ -11,11 +11,13 @@ SECRETS = ["Priya", "Sharma", "1990-04-12", "chest pain", "checkup", "P1-2026101
 
 
 def run_conversation():
-    a = Agent(client=FakeLLM(
-        reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
-        reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="checkup")]),
-        reply("Shall I book Tuesday at 9:30, Priya?"),
-    ))
+    a = Agent(
+        client=FakeLLM(
+            reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
+            reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="checkup")]),
+            reply("Shall I book Tuesday at 9:30, Priya?"),
+        )
+    )
     a.respond("I'm Priya Sharma, born 1990-04-12, I need a checkup")
     a.respond("also I've had chest pain")  # emergency gate
     return a

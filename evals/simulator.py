@@ -35,19 +35,24 @@ def _identity(card: dict) -> str:
 class PatientSimulator:
     def __init__(self, scenario: Scenario, client: OpenAI, model: str, temperature: float = 0.0):
         card = scenario.patient
-        self.system = _PROMPT.format(identity=_identity(card), goal=card["goal"],
-                                     style=card.get("style", "neutral"), done=DONE)
+        self.system = _PROMPT.format(
+            identity=_identity(card), goal=card["goal"], style=card.get("style", "neutral"), done=DONE
+        )
         self.client, self.model, self.temperature = client, model, temperature
         self.history: list[dict] = []  # from the patient's point of view: agent = "user"
 
     def reply(self, agent_text: str) -> str | None:
         """Next patient message, or None when the patient is done."""
         self.history.append({"role": "user", "content": agent_text})
-        text = self.client.chat.completions.create(
-            model=self.model,
-            temperature=self.temperature,
-            messages=[{"role": "system", "content": self.system}, *self.history],
-        ).choices[0].message.content.strip()
+        text = (
+            self.client.chat.completions.create(
+                model=self.model,
+                temperature=self.temperature,
+                messages=[{"role": "system", "content": self.system}, *self.history],
+            )
+            .choices[0]
+            .message.content.strip()
+        )
         if DONE in text:
             return None
         self.history.append({"role": "assistant", "content": text})

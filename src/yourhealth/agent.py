@@ -21,8 +21,8 @@ from openai import OpenAI
 
 from .clinic import Clinic
 from .logs import get_logger, log_event
-from .settings import Settings, get_settings, validate_config
 from .safety import EMERGENCY_REPLY, emergency_match
+from .settings import Settings, get_settings, validate_config
 from .tools import TOOL_SCHEMAS, Session, dispatch
 
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
@@ -45,7 +45,9 @@ def make_client(settings: Settings) -> OpenAI:
 def build_system_prompt(config: dict, clinic: Clinic) -> str:
     days = [clinic.now.date() + timedelta(days=i) for i in range((clinic.horizon_end.date() - clinic.now.date()).days)]
     calendar = "Calendar: " + "; ".join(f"{d:%a %d %b} = {d.isoformat()}" for d in days)
-    prompt = config["core_prompt"].format(clinic_name=clinic.name, now=f"{clinic.now:%A %d %B %Y, %H:%M}", calendar=calendar)
+    prompt = config["core_prompt"].format(
+        clinic_name=clinic.name, now=f"{clinic.now:%A %d %B %Y, %H:%M}", calendar=calendar
+    )
     rules = config.get("learned_rules") or []
     if rules:
         prompt += "\nLEARNED RULES (from past mistakes)\n" + "\n".join(f"- {r['rule']}" for r in rules)
@@ -53,8 +55,13 @@ def build_system_prompt(config: dict, clinic: Clinic) -> str:
 
 
 class Agent:
-    def __init__(self, config: dict | None = None, clinic: Clinic | None = None, client: OpenAI | None = None,
-                 settings: Settings | None = None):
+    def __init__(
+        self,
+        config: dict | None = None,
+        clinic: Clinic | None = None,
+        client: OpenAI | None = None,
+        settings: Settings | None = None,
+    ):
         self.settings = settings or get_settings()
         self.config = config or load_config()
         self.session = Session(clinic=clinic or Clinic.load(self.settings.clinic_data_path))
@@ -76,10 +83,20 @@ class Agent:
         self._usage = {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
         self._error_type: str | None = None
         reply, outcome = self._run_turn(patient_text)
-        log_event(log, "turn", session=s.id, turn=s.turn, outcome=outcome, model=self.model,
-                  config_version=self.config["version"], **self._usage, error_type=self._error_type,
-                  handoff=s.ended, urgent=bool(s.handoff and s.handoff["urgent"]),
-                  ms=round((time.perf_counter() - started) * 1000, 1))
+        log_event(
+            log,
+            "turn",
+            session=s.id,
+            turn=s.turn,
+            outcome=outcome,
+            model=self.model,
+            config_version=self.config["version"],
+            **self._usage,
+            error_type=self._error_type,
+            handoff=s.ended,
+            urgent=bool(s.handoff and s.handoff["urgent"]),
+            ms=round((time.perf_counter() - started) * 1000, 1),
+        )
         return reply
 
     def _run_turn(self, patient_text: str) -> tuple[str, str]:
@@ -110,7 +127,7 @@ class Agent:
                     tools=TOOL_SCHEMAS,
                     parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
                 )
-            except Exception as e:  # network, rate limit, bad request: never leave the patient hanging
+            except Exception as e:  # noqa: BLE001 - any API failure must end in a handoff, never a stranded patient
                 self._error_type = type(e).__name__
                 dispatch(s, "handoff_to_human", {"reason": f"agent error: {type(e).__name__}", "urgent": False})
                 return self._say(FALLBACK_REPLY), "llm_error"
@@ -120,13 +137,20 @@ class Agent:
             if not msg.tool_calls:
                 return self._say(msg.content or ""), "handoff" if s.ended else "reply"
 
-            self.messages.append({
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": [{"id": c.id, "type": "function",
-                                "function": {"name": c.function.name, "arguments": c.function.arguments}}
-                               for c in msg.tool_calls],
-            })
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": c.id,
+                            "type": "function",
+                            "function": {"name": c.function.name, "arguments": c.function.arguments},
+                        }
+                        for c in msg.tool_calls
+                    ],
+                }
+            )
             for c in msg.tool_calls:
                 result = dispatch(s, c.function.name, c.function.arguments)
                 self.messages.append({"role": "tool", "tool_call_id": c.id, "content": json.dumps(result)})
@@ -147,5 +171,8 @@ class Agent:
 
     def transcript(self) -> list[dict]:
         """Patient-visible conversation only (what a transcript-only judge would see)."""
-        return [{"role": m["role"], "content": m["content"]} for m in self.messages
-                if m["role"] in ("user", "assistant") and m.get("content") and not m.get("tool_calls")]
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in self.messages
+            if m["role"] in ("user", "assistant") and m.get("content") and not m.get("tool_calls")
+        ]

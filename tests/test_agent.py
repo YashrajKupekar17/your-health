@@ -4,9 +4,9 @@ import json
 from types import SimpleNamespace as NS
 
 from yourhealth.agent import FALLBACK_REPLY, TOO_LONG_REPLY, Agent, build_system_prompt, load_config, make_client
-from yourhealth.settings import Settings
 from yourhealth.clinic import Clinic
 from yourhealth.safety import EMERGENCY_REPLY, emergency_match
+from yourhealth.settings import Settings
 
 
 def tool_call(name, **args):
@@ -46,8 +46,10 @@ def test_emergency_gate_skips_llm():
 
 
 def test_emergency_gate_fires_mid_booking():
-    a = make(reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
-             reply("Thanks Priya, what can I book?"))
+    a = make(
+        reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
+        reply("Thanks Priya, what can I book?"),
+    )
     a.respond("I'm Priya Sharma, 1990-04-12")
     assert a.respond("actually wait, I suddenly can't breathe") == EMERGENCY_REPLY
 
@@ -102,8 +104,10 @@ def test_conversation_turn_limit_hands_off():
 
 
 def test_turn_deadline_hands_off():
-    a = Agent(client=FakeLLM(*[reply(calls=[tool_call("list_providers", specialty=None)])] * 5),
-              settings=Settings(turn_deadline_s=10))
+    a = Agent(
+        client=FakeLLM(*[reply(calls=[tool_call("list_providers", specialty=None)])] * 5),
+        settings=Settings(turn_deadline_s=10),
+    )
     ticks = iter([0, 4, 8, 12, 16])  # each LLM step "takes" 4 seconds
     a._clock = lambda: next(ticks)
     assert a.respond("hi") == FALLBACK_REPLY

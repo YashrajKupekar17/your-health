@@ -33,8 +33,11 @@ def test_demo_mode_exposes_internals():
 
 
 def test_production_mode_returns_only_the_reply():
-    c = client_for(False, reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
-                   reply("Thanks Priya."))
+    c = client_for(
+        False,
+        reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
+        reply("Thanks Priya."),
+    )
     info = c.get("/api/info").json()
     assert set(info) == {"clinic", "demo_mode"}  # no patient list
     r = c.post(f"/api/session/{start(c)}/message", json={"text": "Priya Sharma 1990-04-12"}).json()
@@ -51,13 +54,20 @@ def test_bad_requests():
 
 def test_conversations_share_one_schedule():
     """A slot booked in one conversation is gone for the next: the clinic is shared, not copied."""
-    book = [reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
-            reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="checkup")]),
-            reply("Confirm Tuesday 9:30?"),
-            reply(calls=[tool_call("confirm_pending")]),
-            reply("Booked.")]
-    c = client_for(True, *book, reply(calls=[tool_call("verify_patient", full_name="Tom Becker", date_of_birth="1979-09-09")]),
-                   reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="flu")]), reply("Sorry."))
+    book = [
+        reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
+        reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="checkup")]),
+        reply("Confirm Tuesday 9:30?"),
+        reply(calls=[tool_call("confirm_pending")]),
+        reply("Booked."),
+    ]
+    c = client_for(
+        True,
+        *book,
+        reply(calls=[tool_call("verify_patient", full_name="Tom Becker", date_of_birth="1979-09-09")]),
+        reply(calls=[tool_call("propose_booking", slot_id="P1-20261013-0930", reason="flu")]),
+        reply("Sorry."),
+    )
     first = start(c)
     c.post(f"/api/session/{first}/message", json={"text": "book 9:30 tue"})
     c.post(f"/api/session/{first}/message", json={"text": "yes"})
@@ -66,6 +76,7 @@ def test_conversations_share_one_schedule():
 
 
 # ---- session store ----------------------------------------------------------------
+
 
 class Clock:
     def __init__(self):
@@ -78,6 +89,7 @@ class Clock:
 @pytest.fixture
 def agent_factory():
     from yourhealth.agent import Agent
+
     return lambda: Agent(client=FakeLLM())
 
 

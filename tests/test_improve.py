@@ -6,8 +6,12 @@ from improve.propose import MAX_RULES, lint
 
 def results(**passes):
     """results(S01=(2, False), ...) -> minimal results dict; tuple = (passes, critical)."""
-    return {"scenarios": {sid: {"passes": p, "valid": 3, "all_pass": p == 3, "critical": c, "title": sid, "split": "train"}
-                          for sid, (p, c) in passes.items()}}
+    return {
+        "scenarios": {
+            sid: {"passes": p, "valid": 3, "all_pass": p == 3, "critical": c, "title": sid, "split": "train"}
+            for sid, (p, c) in passes.items()
+        }
+    }
 
 
 def test_gate_accepts_improvement_without_regression():

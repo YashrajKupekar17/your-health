@@ -20,11 +20,18 @@ def verify(s, name="Priya Sharma", dob="1990-04-12"):
 
 
 def search(s, **kw):
-    args = {"date_from": "2026-10-12", "date_to": "2026-10-16", "provider_id": None, "specialty": None, "part_of_day": None}
+    args = {
+        "date_from": "2026-10-12",
+        "date_to": "2026-10-16",
+        "provider_id": None,
+        "specialty": None,
+        "part_of_day": None,
+    }
     return call(s, "search_slots", **(args | kw))
 
 
 # ---- verification ---------------------------------------------------------------
+
 
 def test_patient_data_requires_verification(s):
     assert call(s, "list_my_appointments")["error"] == "not_verified"
@@ -56,6 +63,7 @@ def test_verify_result_leaks_no_phi(s):
 
 # ---- search ---------------------------------------------------------------------
 
+
 def test_search_excludes_booked_blocked_and_past(s):
     ids = [x["slot_id"] for x in search(s, provider_id="P1", date_to="2026-10-13")["slots"]]
     assert "P1-20261012-0900" not in ids  # now is 09:00, not in the future
@@ -74,6 +82,7 @@ def test_search_beyond_horizon_is_refused(s):
 
 
 # ---- two-step writes ------------------------------------------------------------
+
 
 def test_cannot_propose_and_confirm_in_same_turn(s):
     verify(s)
@@ -126,6 +135,7 @@ def test_switching_patient_drops_pending(s):
 
 
 # ---- robustness -----------------------------------------------------------------
+
 
 def test_bad_input_never_raises(s):
     assert call(s, "no_such_tool")["error"] == "unknown_tool"
@@ -185,7 +195,7 @@ def test_concurrent_bookings_of_one_slot_only_one_wins():
             barrier = threading.Barrier(len(patients))
             wins, unexpected = [], []
 
-            def attempt(pid):
+            def attempt(pid, clinic=clinic, barrier=barrier, wins=wins, unexpected=unexpected):
                 barrier.wait()
                 try:
                     wins.append(clinic.book(pid, "P1-20261013-0930", "race"))

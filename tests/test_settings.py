@@ -11,12 +11,15 @@ def test_shipped_config_is_valid():
     assert cfg["version"] >= 1 and "{calendar}" in cfg["core_prompt"]
 
 
-@pytest.mark.parametrize("mutate, msg", [
-    (lambda c: c.pop("model"), "model"),
-    (lambda c: c.update(temperature=5), "temperature"),
-    (lambda c: c.update(core_prompt="no placeholders"), "placeholders"),
-    (lambda c: c.update(learned_rules=[{"id": "R1", "rule": ""}]), "rule"),
-])
+@pytest.mark.parametrize(
+    "mutate, msg",
+    [
+        (lambda c: c.pop("model"), "model"),
+        (lambda c: c.update(temperature=5), "temperature"),
+        (lambda c: c.update(core_prompt="no placeholders"), "placeholders"),
+        (lambda c: c.update(learned_rules=[{"id": "R1", "rule": ""}]), "rule"),
+    ],
+)
 def test_bad_config_fails_fast(mutate, msg):
     cfg = copy.deepcopy(load_config())
     mutate(cfg)

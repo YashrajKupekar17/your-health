@@ -58,7 +58,9 @@ def _parse(raw: dict) -> Scenario:
     return s
 
 
-def load_scenarios(path: Path = SCENARIOS_PATH, ids: list[str] | None = None, split: str | None = None) -> list[Scenario]:
+def load_scenarios(
+    path: Path = SCENARIOS_PATH, ids: list[str] | None = None, split: str | None = None
+) -> list[Scenario]:
     scenarios = [_parse(r) for r in yaml.safe_load(Path(path).read_text())]
     seen = [s.id for s in scenarios]
     if len(seen) != len(set(seen)):

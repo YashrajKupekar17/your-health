@@ -45,8 +45,9 @@ def _state(agent: Agent) -> dict:
     }
 
 
-def create_app(settings: Settings | None = None, client=None, clinic: Clinic | None = None,
-               store: SessionStore | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, client=None, clinic: Clinic | None = None, store: SessionStore | None = None
+) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
     clinic = clinic or Clinic.load(settings.clinic_data_path)

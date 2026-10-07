@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from openai import OpenAI
 
 from evals.runner import RUNS_DIR, config_hash, harness_fingerprint, render_report, run_eval, summarize
 from evals.scenario import load_scenarios
@@ -63,8 +62,11 @@ def find_baseline(config: dict, n_scenarios: int) -> Path | None:
         f = d / "results.json"
         if f.exists():
             r = json.loads(f.read_text())
-            if (r["config_hash"] == config_hash(config) and r.get("harness") == harness_fingerprint()
-                    and len(r["scenarios"]) == n_scenarios):
+            if (
+                r["config_hash"] == config_hash(config)
+                and r.get("harness") == harness_fingerprint()
+                and len(r["scenarios"]) == n_scenarios
+            ):
                 return d
     return None
 
@@ -82,7 +84,9 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         baseline_dir = Path(before["dir"])
     else:
         before = json.loads((baseline_dir / "results.json").read_text())
-    print(f"Baseline: {baseline_dir.name}  (train {before['summary']['train']}, holdout {before['summary'].get('holdout')})")
+    print(
+        f"Baseline: {baseline_dir.name}  (train {before['summary']['train']}, holdout {before['summary'].get('holdout')})"
+    )
 
     by_check = collect_failures(before, baseline_dir)
     if not by_check:
@@ -92,9 +96,18 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
     feedback = ""
     for attempt in range(1, max_attempts + 1):
         p = propose_rule(config, by_check, client, feedback)
-        print(f"\n--- Attempt {attempt}: proposed rule (targets {p.fixes}, check '{p.check}')\n  {p.rule}\n  why: {p.why}")
-        entry = {"attempt": attempt, "config_version": version, "baseline_run": baseline_dir.name,
-                 "rule": p.rule, "why": p.why, "fixes": p.fixes, "check": p.check}
+        print(
+            f"\n--- Attempt {attempt}: proposed rule (targets {p.fixes}, check '{p.check}')\n  {p.rule}\n  why: {p.why}"
+        )
+        entry = {
+            "attempt": attempt,
+            "config_version": version,
+            "baseline_run": baseline_dir.name,
+            "rule": p.rule,
+            "why": p.why,
+            "fixes": p.fixes,
+            "check": p.check,
+        }
 
         if p.lint_errors:
             print(f"  REJECTED by lint: {p.lint_errors}")
@@ -104,10 +117,15 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
 
         candidate = copy.deepcopy(config)
         candidate["version"] = version + 1
-        candidate["learned_rules"] = list(config.get("learned_rules") or []) + [{
-            "id": f"R{len(config.get('learned_rules') or []) + 1}", "rule": p.rule, "why": p.why,
-            "fixes": p.fixes, "learned_from": baseline_dir.name,
-        }]
+        candidate["learned_rules"] = list(config.get("learned_rules") or []) + [
+            {
+                "id": f"R{len(config.get('learned_rules') or []) + 1}",
+                "rule": p.rule,
+                "why": p.why,
+                "fixes": p.fixes,
+                "learned_from": baseline_dir.name,
+            }
+        ]
 
         # Stage 1: cheap check on the targeted scenarios only.
         target_sc = [s for s in scenarios if s.id in p.fixes]
@@ -115,7 +133,10 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         g1 = evaluate(before, stage1, p.fixes)
         print(f"  stage 1 (targets only): {'ok' if g1.accepted else g1.reasons}")
         if not g1.accepted:
-            log(entry | {"decision": "rejected_stage1", "reasons": g1.reasons, "candidate_run": Path(stage1["dir"]).name})
+            log(
+                entry
+                | {"decision": "rejected_stage1", "reasons": g1.reasons, "candidate_run": Path(stage1["dir"]).name}
+            )
             feedback = f"rule {p.rule!r} did not fix its targets: {g1.reasons}"
             continue
 
@@ -125,7 +146,9 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         if g.drops:
             # 3 trials are noisy: a drop only counts if it reproduces on a fresh re-run.
             print(f"  apparent drop in {g.drops}; confirming with a fresh re-run...")
-            confirm = run_eval(candidate, [s for s in scenarios if s.id in g.drops], trials, label=f"v{version + 1}-confirm")
+            confirm = run_eval(
+                candidate, [s for s in scenarios if s.id in g.drops], trials, label=f"v{version + 1}-confirm"
+            )
             after["scenarios"].update(confirm["scenarios"])
             after["summary"] = summarize(after)
             g = evaluate(before, after, p.fixes)
@@ -138,7 +161,8 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             f"**Learned from:** `{baseline_dir.name}` (check `{p.check}`)\n\n**Gate:** "
             f"{'passed' if g.accepted else 'FAILED: ' + '; '.join(g.reasons)}\n\n{table}\n\n"
             f"Before: train {before['summary']['train']}, holdout {before['summary'].get('holdout')}\n\n"
-            f"After: train {after['summary']['train']}, holdout {after['summary'].get('holdout')}\n")
+            f"After: train {after['summary']['train']}, holdout {after['summary'].get('holdout')}\n"
+        )
         (out / "after_report.md").write_text(render_report(after))
         print(f"\n{table}\n")
         entry |= {"candidate_run": Path(after["dir"]).name, "comparison": str(out.relative_to(ROOT))}

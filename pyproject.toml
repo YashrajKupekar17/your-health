@@ -26,4 +26,14 @@ pythonpath = ["."]
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "ruff>=0.16.10",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["research_notes", "reports", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "BLE"]
+ignore = ["E731", "E501"]  # small lambdas are fine; line length is owned by `ruff format`

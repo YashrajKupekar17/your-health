@@ -56,6 +56,8 @@ def comparison_table(before: dict, after: dict, targets: list[str]) -> str:
         mark = "⬆" if delta > 0 else ("⬇" if delta < 0 else "")
         tag = " (target)" if sid in targets else ""
         crit = " ⚠" if r["critical"] else ""
-        lines.append(f"| {sid} {r['title']}{crit}{tag} | {r['split']} | {b['passes']}/{b['valid']} | "
-                     f"{r['passes']}/{r['valid']} | {mark} |")
+        lines.append(
+            f"| {sid} {r['title']}{crit}{tag} | {r['split']} | {b['passes']}/{b['valid']} | "
+            f"{r['passes']}/{r['valid']} | {mark} |"
+        )
     return "\n".join(lines)

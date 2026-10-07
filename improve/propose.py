@@ -76,8 +76,14 @@ def collect_failures(results: dict, run_dir: Path) -> dict[str, list[dict]]:
             for c in t["checks"]:
                 if not c["passed"]:
                     by_check.setdefault(c["name"], []).append(
-                        {"scenario": sid, "title": r["title"], "trial": t["trial"], "detail": c["detail"],
-                         "exchange": _failing_turn(trace, c)})
+                        {
+                            "scenario": sid,
+                            "title": r["title"],
+                            "trial": t["trial"],
+                            "detail": c["detail"],
+                            "exchange": _failing_turn(trace, c),
+                        }
+                    )
     return by_check
 
 
@@ -86,7 +92,9 @@ def _render_failures(by_check: dict[str, list[dict]], limit_per_check: int = 4) 
     for check, items in sorted(by_check.items(), key=lambda kv: -len(kv[1])):
         out.append(f"## {check}: {len(items)} failed trials across {sorted({i['scenario'] for i in items})}")
         for i in items[:limit_per_check]:
-            out.append(f"- {i['scenario']} ({i['title']}), trial {i['trial']}: {i['detail'][:300]}\n  {i['exchange'][:900]}")
+            out.append(
+                f"- {i['scenario']} ({i['title']}), trial {i['trial']}: {i['detail'][:300]}\n  {i['exchange'][:900]}"
+            )
     return "\n".join(out)
 
 
@@ -97,8 +105,11 @@ def lint(rule: str, existing: list[dict]) -> list[str]:
         errors.append(f"longer than {MAX_RULE_WORDS} words")
     if re.search(r"\b[SR]\d{2}\b|\bA\d{4}\b|\bP\d-\d{8}", rule):
         errors.append("mentions a scenario, appointment or slot id")
-    if re.search(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2} (January|February|March|April|May|June|July|August|"
-                 r"September|October|November|December)\b", rule):
+    if re.search(
+        r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2} (January|February|March|April|May|June|July|August|"
+        r"September|October|November|December)\b",
+        rule,
+    ):
         errors.append("mentions a specific date")
     names = {n for p in Clinic.load().patients.values() for n in p["name"].split()}
     if any(re.search(rf"\b{re.escape(n)}\b", rule) for n in names):
@@ -119,13 +130,23 @@ def propose_rule(config: dict, by_check: dict[str, list[dict]], client: OpenAI, 
         failures=_render_failures(by_check),
         feedback=f"\nA PREVIOUS ATTEMPT WAS REJECTED: {feedback}\n" if feedback else "",
     )
-    raw = client.chat.completions.create(
-        model=os.getenv("PROPOSER_MODEL", "gpt-4.1"), temperature=0.2,
-        response_format={"type": "json_object"}, messages=[{"role": "user", "content": prompt}],
-    ).choices[0].message.content
+    raw = (
+        client.chat.completions.create(
+            model=os.getenv("PROPOSER_MODEL", "gpt-4.1"),
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        .choices[0]
+        .message.content
+    )
     data = json.loads(raw)
-    p = Proposal(rule=str(data.get("rule", "")).strip(), why=str(data.get("why", "")).strip(),
-                 fixes=[str(x) for x in data.get("fixes", [])], check=str(data.get("check", "")))
+    p = Proposal(
+        rule=str(data.get("rule", "")).strip(),
+        why=str(data.get("why", "")).strip(),
+        fixes=[str(x) for x in data.get("fixes", [])],
+        check=str(data.get("check", "")),
+    )
     # The proposer may only claim scenarios it was shown failing.
     shown = {i["scenario"] for items in by_check.values() for i in items}
     p.fixes = [f for f in p.fixes if f in shown] or sorted(shown)

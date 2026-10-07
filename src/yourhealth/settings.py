@@ -79,6 +79,7 @@ def get_settings() -> Settings:
 
 # ---- agent config schema (config/agent.yaml) ------------------------------------
 
+
 class LearnedRule(BaseModel):
     id: str
     rule: str = Field(min_length=1)
