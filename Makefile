@@ -4,7 +4,7 @@ install:
 	uv sync
 
 ui:              ## web UI at http://127.0.0.1:8000 (chat + behind-the-scenes panel)
-	uv run python -m yourhealth.server
+	DEMO_MODE=1 uv run python -m yourhealth.server
 
 chat:            ## talk to the agent (tool calls shown)
 	uv run python -m yourhealth.chat --debug

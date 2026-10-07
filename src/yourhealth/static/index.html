@@ -106,7 +106,7 @@ const DEMOS = [
 ];
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-let sessionId = null, busy = false;
+let sessionId = null, busy = false, demo = false;
 
 function add(cls, text) {
   const el = document.createElement("div");
@@ -146,11 +146,11 @@ function renderTools(tools) {
 
 async function start() {
   $("log").innerHTML = "";
-  renderTools([]);
+  if (demo) renderTools([]);
   const r = await fetch("/api/session", {method: "POST"}).then((r) => r.json());
   sessionId = r.session_id;
   add("agent", r.greeting);
-  renderState(r.state);
+  if (demo) renderState(r.state);
   setBusy(false);
 }
 
@@ -169,16 +169,15 @@ async function send(text) {
     if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
     const r = await res.json();
     thinking.textContent = r.reply;
-    if (r.tools.length) {
+    if (demo && r.tools.length) {
       const inline = document.createElement("div");
       inline.className = "tools-inline";
       inline.textContent = "↳ " + r.tools.map((t) => `${t.tool}${t.result.ok ? "" : " ✗ " + t.result.error}`).join("  ·  ");
       thinking.before(inline);
     }
-    renderTools(r.tools);
-    renderState(r.state);
+    if (demo) { renderTools(r.tools); renderState(r.state); }
     if (r.ended) {
-      const h = r.state.handoff;
+      const h = demo ? r.state.handoff : null;
       add("system" + (h && h.urgent ? " urgent" : ""), `Conversation handed to clinic staff${h && h.urgent ? " (URGENT)" : ""}: ${h ? h.reason : ""}`);
       return; // stay disabled: the agent has stopped
     }
@@ -194,6 +193,17 @@ async function send(text) {
 async function init() {
   const info = await fetch("/api/info").then((r) => r.json());
   $("clinic").textContent = info.clinic;
+  demo = info.demo_mode;
+  if (!demo) {
+    document.querySelector("aside").hidden = true;
+    document.querySelector("main").style.gridTemplateColumns = "minmax(0, 1fr)";
+    $("meta").textContent = "Automated scheduling assistant";
+    $("chips").innerHTML = "";
+    $("form").addEventListener("submit", (e) => { e.preventDefault(); send($("text").value); });
+    $("reset").addEventListener("click", start);
+    await start();
+    return;
+  }
   $("meta").textContent = `Simulated now: ${info.now} · agent config v${info.config_version}`;
   $("patients").innerHTML = info.patients.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.dob)}</td></tr>`).join("");
   $("rules").innerHTML = info.learned_rules.length ? "<ul>" + info.learned_rules.map((r) => `<li>${esc(r)}</li>`).join("") + "</ul>" : "None yet.";

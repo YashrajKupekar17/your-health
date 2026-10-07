@@ -1,36 +1,35 @@
-"""Small web UI: chat with the agent and watch what happens behind the scenes.
+"""Web API + UI for the agent.
 
-In-memory sessions only (this is a demo, not a deployment): each browser session gets its own
-Agent and its own copy of the clinic, capped and evicted oldest-first.
+Built by `create_app()` so tests (and a real deployment) inject settings, the LLM client, the
+clinic and the session store. One clinic instance is shared by all conversations: it stands in for
+the practice's scheduling system, so two patients really compete for the same slots.
+
+DEMO_MODE=1 exposes internals for the walkthrough (tool calls, session state, the demo patient
+list). Without it, the API returns only the reply: tool results, appointment details and the
+patient list never leave the server.
 """
 
 from __future__ import annotations
 
-import threading
-import uuid
-from collections import OrderedDict
+import time
 from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from .agent import Agent, load_config
+from .agent import Agent, load_config, make_client
 from .clinic import Clinic
+from .logs import configure_logging, get_logger, log_event
+from .sessions import InMemorySessionStore, SessionStore
+from .settings import Settings, get_settings, load_env
 
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
-
-MAX_SESSIONS = 50
 STATIC = Path(__file__).resolve().parent / "static"
-
-app = FastAPI(title="YourHealth scheduling agent")
-_sessions: OrderedDict[str, Agent] = OrderedDict()
-_lock = threading.Lock()
+log = get_logger("server")
 
 
 class Message(BaseModel):
-    text: str = Field(min_length=1, max_length=2000)
+    text: str
 
 
 def _state(agent: Agent) -> dict:
@@ -46,58 +45,81 @@ def _state(agent: Agent) -> dict:
     }
 
 
-def _get(session_id: str) -> Agent:
-    with _lock:
-        agent = _sessions.get(session_id)
-    if agent is None:
-        raise HTTPException(404, "session not found; start a new conversation")
-    return agent
+def create_app(settings: Settings | None = None, client=None, clinic: Clinic | None = None,
+               store: SessionStore | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings.log_level)
+    clinic = clinic or Clinic.load(settings.clinic_data_path)
+    store = store or InMemorySessionStore(settings.max_sessions, settings.session_idle_ttl_s)
+    llm = {"client": client}  # created on first use: one connection pool for every conversation
 
+    def get_client():
+        if llm["client"] is None:
+            llm["client"] = make_client(settings)
+        return llm["client"]
 
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+    app = FastAPI(title="YourHealth scheduling agent")
 
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC / "index.html")
 
-@app.get("/api/info")
-def info() -> dict:
-    config = load_config()
-    clinic = Clinic.load()
-    return {
-        "clinic": clinic.name,
-        "now": f"{clinic.now:%A %d %B %Y, %H:%M}",
-        "config_version": config["version"],
-        "learned_rules": [r["rule"] for r in config.get("learned_rules") or []],
-        "patients": [{"name": p["name"], "dob": p["dob"]} for p in clinic.patients.values()],
-        "providers": clinic.list_providers(),
-    }
+    @app.get("/healthz")
+    def healthz() -> dict:
+        return {"ok": True, "sessions": len(store)}
 
+    @app.get("/api/info")
+    def info() -> dict:
+        out = {"clinic": clinic.name, "demo_mode": settings.demo_mode}
+        if settings.demo_mode:
+            config = load_config(settings.config_path)
+            out |= {
+                "now": f"{clinic.now:%A %d %B %Y, %H:%M}",
+                "config_version": config["version"],
+                "learned_rules": [r["rule"] for r in config["learned_rules"]],
+                "patients": [{"name": p["name"], "dob": p["dob"]} for p in clinic.patients.values()],
+            }
+        return out
 
-@app.post("/api/session")
-def new_session() -> dict:
-    agent = Agent()
-    sid = uuid.uuid4().hex
-    with _lock:
-        _sessions[sid] = agent
-        while len(_sessions) > MAX_SESSIONS:
-            _sessions.popitem(last=False)
-    return {"session_id": sid, "greeting": agent.greeting, "state": _state(agent)}
+    @app.post("/api/session")
+    def new_session() -> dict:
+        # Config is read per conversation: a new version from the loop applies to new chats only.
+        agent = Agent(config=load_config(settings.config_path), clinic=clinic, client=get_client(), settings=settings)
+        sid = store.put(agent)
+        log_event(log, "session_created", session=sid, config_version=agent.config["version"])
+        out = {"session_id": sid, "greeting": agent.greeting}
+        if settings.demo_mode:
+            out["state"] = _state(agent)
+        return out
 
+    @app.post("/api/session/{session_id}/message")
+    def send(session_id: str, msg: Message) -> dict:
+        text = msg.text.strip()
+        if not text or len(text) > settings.max_message_chars:
+            raise HTTPException(422, f"message must be 1-{settings.max_message_chars} characters")
+        agent = store.get(session_id)
+        if agent is None:
+            raise HTTPException(404, "session not found or expired; start a new conversation")
+        started = time.perf_counter()
+        with agent.lock:  # one message at a time per conversation
+            seen = len(agent.session.tool_log)
+            reply = agent.respond(text)
+            tools = agent.session.tool_log[seen:]
+        log_event(log, "message", session=session_id, ms=round((time.perf_counter() - started) * 1000, 1))
+        out = {"reply": reply, "ended": agent.session.ended}
+        if settings.demo_mode:
+            out |= {"tools": tools, "state": _state(agent)}
+        return out
 
-@app.post("/api/session/{session_id}/message")
-def send(session_id: str, msg: Message) -> dict:
-    agent = _get(session_id)
-    with agent.lock:  # one message at a time per conversation
-        seen = len(agent.session.tool_log)
-        reply = agent.respond(msg.text.strip())
-        tools = agent.session.tool_log[seen:]
-    return {"reply": reply, "tools": tools, "state": _state(agent), "ended": agent.session.ended}
+    return app
 
 
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("yourhealth.server:app", host="127.0.0.1", port=8000)
+    load_env()
+    settings = get_settings()
+    uvicorn.run("yourhealth.server:create_app", factory=True, host=settings.host, port=settings.port)
 
 
 if __name__ == "__main__":
