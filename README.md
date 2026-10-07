@@ -4,7 +4,7 @@ A chat agent that books, reschedules and cancels clinic appointments, an eval ha
 against designed scenarios (including the hard cases), and an improvement loop that turns failures
 into a gated, versioned prompt rule, then re-runs the suite to prove the score moved without regressions.
 
-Design note: [`docs/DESIGN.md`](docs/DESIGN.md) · AI usage: [`docs/AI_USAGE.md`](docs/AI_USAGE.md) ·
+Design note: [`docs/DESIGN.md`](docs/DESIGN.md) · Architecture diagrams: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · AI usage: [`docs/AI_USAGE.md`](docs/AI_USAGE.md) ·
 Before/after evidence: [`docs/evidence/cycle1/`](docs/evidence/cycle1/comparison.md)
 
 ## Setup
