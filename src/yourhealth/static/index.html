@@ -33,6 +33,7 @@
   .msg.you { background: var(--accent); color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
   .msg.system { align-self: center; background: var(--warn-bg); color: var(--warn); font-size: 13px; max-width: 95%; }
   .msg.urgent { background: var(--urgent-bg); }
+  .msg.progress { color: var(--muted); font-style: italic; }
   .tools-inline { align-self: flex-start; font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); padding-left: 4px; }
   #chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
   .chip { border: 1px solid var(--border); background: var(--accent-soft); color: var(--text); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
@@ -156,18 +157,42 @@ async function start() {
 
 function setBusy(b) { busy = b; $("send").disabled = b; $("text").disabled = b; }
 
+// POST + server-sent events: `progress` labels while tools run, then `done` with the guarded reply.
+async function streamMessage(text, onProgress) {
+  const res = await fetch(`/api/session/${sessionId}/message/stream`, {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text}),
+  });
+  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    let cut;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      const event = /^event: (.*)$/m.exec(block)?.[1];
+      const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] || "{}");
+      if (event === "progress") onProgress(data.label);
+      else if (event === "done") return data;
+      else if (event === "error") throw new Error(data.detail);
+    }
+  }
+  throw new Error("connection closed before a reply arrived");
+}
+
 async function send(text) {
   if (busy || !text.trim() || !sessionId) return;
   add("you", text);
   $("text").value = "";
   setBusy(true);
-  const thinking = add("agent", "…");
+  const thinking = add("agent progress", "…");
   try {
-    const res = await fetch(`/api/session/${sessionId}/message`, {
-      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text}),
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    const r = await res.json();
+    const r = await streamMessage(text, (label) => { thinking.textContent = label; });
+    thinking.classList.remove("progress");
     thinking.textContent = r.reply;
     if (demo && r.tools.length) {
       const inline = document.createElement("div");
