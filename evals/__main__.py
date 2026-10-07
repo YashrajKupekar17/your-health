@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from yourhealth.agent import load_config
+from yourhealth.logs import configure_logging
 from yourhealth.settings import load_env
 
 from .runner import run_eval
@@ -22,6 +24,7 @@ def main() -> None:
     p.add_argument("--config", type=Path, help="agent config to evaluate (default: settings.config_path)")
     args = p.parse_args()
     load_env()
+    configure_logging(os.getenv("LOG_LEVEL", "WARNING"))
 
     scenarios = load_scenarios(ids=args.scenario, split=args.split)
     results = run_eval(load_config(args.config), scenarios, args.trials, args.label, use_judge=not args.no_judge)

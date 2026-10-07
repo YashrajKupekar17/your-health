@@ -20,12 +20,14 @@ import yaml
 from openai import OpenAI
 
 from .clinic import Clinic
+from .logs import get_logger, log_event
 from .settings import Settings, get_settings, validate_config
 from .safety import EMERGENCY_REPLY, emergency_match
 from .tools import TOOL_SCHEMAS, Session, dispatch
 
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
+log = get_logger("agent")
 TOO_LONG_REPLY = "We've covered a lot. Let me connect you with our front desk so they can finish this with you."
 GREETING = "Hi, this is {clinic}. I'm an automated scheduling assistant. How can I help you today?"
 
@@ -70,37 +72,53 @@ class Agent:
         s = self.session
         if s.ended:
             return ENDED_REPLY
+        started = time.perf_counter()
+        self._usage = {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        self._error_type: str | None = None
+        reply, outcome = self._run_turn(patient_text)
+        log_event(log, "turn", session=s.id, turn=s.turn, outcome=outcome, model=self.model,
+                  config_version=self.config["version"], **self._usage, error_type=self._error_type,
+                  handoff=s.ended, urgent=bool(s.handoff and s.handoff["urgent"]),
+                  ms=round((time.perf_counter() - started) * 1000, 1))
+        return reply
+
+    def _run_turn(self, patient_text: str) -> tuple[str, str]:
+        """One patient turn. Returns (reply, outcome code) where every exit path has its own code."""
+        s = self.session
         s.turn += 1
         s.patient_messages.append(patient_text)
         self.messages.append({"role": "user", "content": patient_text})
 
         if s.turn > self.settings.max_turns:
             dispatch(s, "handoff_to_human", {"reason": "conversation turn limit reached", "urgent": False})
-            return self._say(TOO_LONG_REPLY)
+            return self._say(TOO_LONG_REPLY), "turn_limit"
 
         if hit := emergency_match(patient_text):
             dispatch(s, "handoff_to_human", {"reason": f"emergency gate: '{hit}'", "urgent": True})
-            return self._say(EMERGENCY_REPLY)
+            return self._say(EMERGENCY_REPLY), "emergency_gate"
 
         deadline = self._clock() + self.settings.turn_deadline_s
         for _ in range(self.config["max_tool_steps"]):
             if self._clock() > deadline:
                 dispatch(s, "handoff_to_human", {"reason": "agent turn deadline exceeded", "urgent": False})
-                return self._say(FALLBACK_REPLY)
+                return self._say(FALLBACK_REPLY), "deadline"
             try:
-                msg = self.client.chat.completions.create(
+                response = self.client.chat.completions.create(
                     model=self.model,
                     temperature=self.config["temperature"],
                     messages=self.messages,
                     tools=TOOL_SCHEMAS,
                     parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
-                ).choices[0].message
+                )
             except Exception as e:  # network, rate limit, bad request: never leave the patient hanging
+                self._error_type = type(e).__name__
                 dispatch(s, "handoff_to_human", {"reason": f"agent error: {type(e).__name__}", "urgent": False})
-                return self._say(FALLBACK_REPLY)
+                return self._say(FALLBACK_REPLY), "llm_error"
+            self._count_usage(response)
+            msg = response.choices[0].message
 
             if not msg.tool_calls:
-                return self._say(msg.content or "")
+                return self._say(msg.content or ""), "handoff" if s.ended else "reply"
 
             self.messages.append({
                 "role": "assistant",
@@ -114,7 +132,14 @@ class Agent:
                 self.messages.append({"role": "tool", "tool_call_id": c.id, "content": json.dumps(result)})
 
         dispatch(s, "handoff_to_human", {"reason": "agent exceeded tool step limit", "urgent": False})
-        return self._say(FALLBACK_REPLY)
+        return self._say(FALLBACK_REPLY), "step_limit"
+
+    def _count_usage(self, response) -> None:
+        self._usage["llm_calls"] += 1
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self._usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
+            self._usage["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0
 
     def _say(self, text: str) -> str:
         self.messages.append({"role": "assistant", "content": text})

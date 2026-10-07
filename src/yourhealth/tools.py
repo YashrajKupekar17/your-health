@@ -13,10 +13,15 @@ Design rules enforced here (in code, not in the prompt):
 from __future__ import annotations
 
 import json
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import date
 
 from .clinic import Clinic, ClinicError
+from .logs import get_logger, log_event
+
+log = get_logger("tools")
 
 MAX_VERIFY_ATTEMPTS = 3
 HANDOFF_QUOTE_MESSAGES = 3
@@ -33,6 +38,7 @@ class Pending:
 @dataclass
 class Session:
     clinic: Clinic
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
     turn: int = 0  # incremented by the agent on every patient message
     patient_id: str | None = None  # set only by a successful verify_patient
     failed_verifications: int = 0
@@ -218,6 +224,7 @@ _IMPLS = {name: impl for name, _, impl in _REGISTRY}
 
 def dispatch(s: Session, name: str, arguments: str | dict) -> dict:
     """Run one tool call. Never raises: every failure becomes a result the model can read."""
+    started = time.perf_counter()
     try:
         args = json.loads(arguments or "{}") if isinstance(arguments, str) else arguments
         impl = _IMPLS.get(name)
@@ -233,4 +240,6 @@ def dispatch(s: Session, name: str, arguments: str | dict) -> dict:
         args = arguments
         result = err("bad_arguments", f"Invalid arguments for {name}: {e}")
     s.tool_log.append({"turn": s.turn, "tool": name, "args": args, "result": result})
+    log_event(log, "tool_call", session=s.id, turn=s.turn, tool=name, ok=result["ok"],
+              error=result.get("error"), ms=round((time.perf_counter() - started) * 1000, 1))
     return result

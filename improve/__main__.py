@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
+from yourhealth.logs import configure_logging
 from yourhealth.settings import load_env
 
 from .loop import rollback, run_cycle
@@ -20,6 +22,7 @@ def main() -> None:
     p.add_argument("--attempts", type=int, default=2)
     args = p.parse_args()
     load_env()
+    configure_logging(os.getenv("LOG_LEVEL", "WARNING"))
 
     if args.cmd == "rollback":
         rollback(args.version)

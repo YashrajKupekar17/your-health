@@ -6,6 +6,9 @@ import argparse
 import json
 
 from .agent import Agent
+import os
+
+from .logs import configure_logging
 from .settings import load_env
 
 DIM, CYAN, RESET = "\033[2m", "\033[36m", "\033[0m"
@@ -16,6 +19,7 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="show tool calls and session state")
     args = parser.parse_args()
     load_env()
+    configure_logging(os.getenv("LOG_LEVEL", "WARNING"))  # keep the terminal chat readable
 
     agent = Agent()
     s = agent.session
