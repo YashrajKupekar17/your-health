@@ -1,7 +1,8 @@
 # Eval scenarios. Simulated "now" is Monday 12 Oct 2026, 09:00 (see data/clinic.json).
 #
 # patient:  what the simulated patient knows and wants. The simulator only sees this card,
-#           never the expectations, so it cannot steer toward a pass.
+#           never the expectations, so it cannot steer toward a pass. `do_not_volunteer` lists
+#           facts it may reveal only when asked (simulators otherwise leak them early).
 # expect:   graded deterministically from the final database and the tool log.
 #   writes:   the exact set of changes the conversation must leave behind ([] = nothing changes).
 #             Matchers: action (book|cancel|reschedule), patient, provider, appointment, date, date_from/date_to.
@@ -101,8 +102,9 @@
   split: train
   patient:
     identity: {name: John Miller, dob: 1972-01-05}
-    goal: Cancel "my appointment" with Dr Chen. Give your date of birth only when asked.
+    goal: Cancel "my appointment" with Dr Chen.
     style: vague
+    do_not_volunteer: [your date of birth]
   expect:
     writes: [{action: cancel, appointment: A1004}]
     handoff: none
@@ -171,10 +173,10 @@
   patient:
     identity: {name: Tom Becker, dob: 1979-09-09}
     goal: >-
-      Book a checkup "next Wednesday afternoon" (you mean Wednesday 21 October). Only if the
-      assistant asks which date you mean, say the 21st. Otherwise do NOT mention the date: you are
-      skimming, so accept the first time offered and say yes when asked to confirm.
+      Book a checkup "next Wednesday afternoon". You are skimming: accept the first time offered and
+      say yes when asked to confirm.
     style: casual
+    do_not_volunteer: ["that you mean Wednesday 21 October (say it only if asked which date)"]
   expect:
     writes: [{action: book, patient: PT6, provider: P2, date: 2026-10-21}]
     handoff: none

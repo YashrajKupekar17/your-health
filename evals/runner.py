@@ -61,12 +61,23 @@ def run_trial(sc: Scenario, config: dict, trial: int, client: OpenAI) -> dict:
     agent = Agent(config=config, clinic=clinic, client=client)
     sim = PatientSimulator(sc, client, models()["sim"])
     s = agent.session
-    trace = {"scenario": sc.id, "trial": trial, "greeting": agent.greeting, "turns": [], "error": None}
+    trace = {
+        "scenario": sc.id,
+        "trial": trial,
+        "greeting": agent.greeting,
+        "turns": [],
+        "error": None,
+        "sim_stop_overruled": 0,
+    }
 
     agent_text = agent.greeting
     try:
         for _ in range(MAX_TURNS):
             patient_text = sim.reply(agent_text)
+            if patient_text is None and s.pending is not None:
+                # Code owns the stop: a proposal is awaiting the patient's yes/no, so it is not over.
+                trace["sim_stop_overruled"] += 1
+                patient_text = sim.insist()
             if patient_text is None:
                 break
             seen = len(s.tool_log)
@@ -102,7 +113,13 @@ def grade_trial(sc: Scenario, trace: dict, client: OpenAI, use_judge: bool) -> d
         outcome = "sim_error"  # failed, but the simulated patient went off-script: not the agent's fault
     else:
         outcome = "fail"
-    return {"trial": trace["trial"], "outcome": outcome, "checks": [asdict(c) for c in checks], "judge": judge}
+    return {
+        "trial": trace["trial"],
+        "outcome": outcome,
+        "checks": [asdict(c) for c in checks],
+        "judge": judge,
+        "sim_stop_overruled": trace.get("sim_stop_overruled", 0),
+    }
 
 
 def run_eval(
@@ -210,6 +227,8 @@ def render_report(results: dict) -> str:
         other = [t["outcome"] for t in r["trials"] if t["outcome"] in ("sim_error", "infra_error")]
         crit = " ⚠" if r["critical"] else ""
         mark = "✅" if r["all_pass"] else "❌"
+        overruled = sum(t.get("sim_stop_overruled", 0) for t in r["trials"])
+        other += [f"sim tried to stop early ×{overruled}"] if overruled else []
         note = f" ({', '.join(other)})" if other else ""
         lines.append(
             f"| {mark} {sid} {r['title']}{crit} | {r['split']} | {fmt_interval(r['passes'], r['valid'])}{note} | "
