@@ -4,7 +4,10 @@ Per patient message:
   1. turn += 1 (this is what lets confirm_pending tell a later turn from the same turn)
   2. emergency gate (code) -> fixed reply + urgent handoff, LLM never runs
   3. LLM <-> tools loop, capped at max_tool_steps
-  4. if the step cap, the turn deadline or the conversation turn limit is hit, or the API fails,
+  4. before the final reply reaches the patient, the output guard checks it (false "you're booked",
+     another patient's identifiers). A blocked draft is never shown: the model gets one rewrite,
+     then a safe fixed reply is used.
+  5. if the step cap, the turn deadline or the conversation turn limit is hit, or the API fails,
      hand off rather than leave the patient stuck. Every LLM request also has its own timeout.
 """
 
@@ -13,6 +16,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -20,6 +24,7 @@ import yaml
 from openai import OpenAI
 
 from .clinic import Clinic
+from .guard import check_reply
 from .logs import get_logger, log_event
 from .safety import EMERGENCY_REPLY, emergency_match
 from .settings import Settings, get_settings, validate_config
@@ -28,6 +33,19 @@ from .tools import TOOL_SCHEMAS, Session, dispatch
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
 log = get_logger("agent")
+
+# Patient-safe progress labels shown while a tool runs (no arguments, no data: safe outside demo mode).
+PROGRESS_LABELS = {
+    "verify_patient": "Verifying your details…",
+    "list_providers": "Looking up our providers…",
+    "search_slots": "Checking availability…",
+    "list_my_appointments": "Looking up your appointments…",
+    "propose_booking": "Preparing that booking…",
+    "propose_reschedule": "Preparing that change…",
+    "propose_cancel": "Preparing that cancellation…",
+    "confirm_pending": "Confirming with the clinic…",
+    "handoff_to_human": "Connecting you with our staff…",
+}
 TOO_LONG_REPLY = "We've covered a lot. Let me connect you with our front desk so they can finish this with you."
 GREETING = "Hi, this is {clinic}. I'm an automated scheduling assistant. How can I help you today?"
 
@@ -67,6 +85,7 @@ class Agent:
         self.session = Session(clinic=clinic or Clinic.load(self.settings.clinic_data_path))
         self.client = client or make_client(self.settings)
         self._clock = time.monotonic  # injectable for tests
+        self._on_progress: Callable[[str], None] | None = None
         self.model = self.settings.agent_model or self.config["model"]
         self.lock = threading.Lock()  # callers serialise messages per conversation
         self.greeting = GREETING.format(clinic=self.session.clinic.name)
@@ -75,7 +94,9 @@ class Agent:
             {"role": "assistant", "content": self.greeting},
         ]
 
-    def respond(self, patient_text: str) -> str:
+    def respond(self, patient_text: str, on_progress: Callable[[str], None] | None = None) -> str:
+        """Handle one patient message. `on_progress(label)` is called before each tool runs."""
+        self._on_progress = on_progress
         s = self.session
         if s.ended:
             return ENDED_REPLY
@@ -115,6 +136,7 @@ class Agent:
             return self._say(EMERGENCY_REPLY), "emergency_gate"
 
         deadline = self._clock() + self.settings.turn_deadline_s
+        guard_retried = False
         for _ in range(self.config["max_tool_steps"]):
             if self._clock() > deadline:
                 dispatch(s, "handoff_to_human", {"reason": "agent turn deadline exceeded", "urgent": False})
@@ -135,7 +157,18 @@ class Agent:
             msg = response.choices[0].message
 
             if not msg.tool_calls:
-                return self._say(msg.content or ""), "handoff" if s.ended else "reply"
+                text = msg.content or ""
+                verdict = check_reply(text, s)
+                if verdict.ok:
+                    outcome = "handoff" if s.ended else ("reply_after_guard" if guard_retried else "reply")
+                    return self._say(text), outcome
+                log_event(log, "guard_blocked", session=s.id, turn=s.turn, kind=verdict.kind, retried=guard_retried)
+                if guard_retried:
+                    return self._say(verdict.safe_reply), "guard_fallback"
+                guard_retried = True
+                # The blocked draft is never shown or kept; the model is told why and rewrites once.
+                self.messages.append({"role": "system", "content": verdict.note})
+                continue
 
             self.messages.append(
                 {
@@ -152,11 +185,19 @@ class Agent:
                 }
             )
             for c in msg.tool_calls:
+                self._progress(c.function.name)
                 result = dispatch(s, c.function.name, c.function.arguments)
                 self.messages.append({"role": "tool", "tool_call_id": c.id, "content": json.dumps(result)})
 
         dispatch(s, "handoff_to_human", {"reason": "agent exceeded tool step limit", "urgent": False})
         return self._say(FALLBACK_REPLY), "step_limit"
+
+    def _progress(self, tool_name: str) -> None:
+        if self._on_progress and tool_name in PROGRESS_LABELS:
+            try:
+                self._on_progress(PROGRESS_LABELS[tool_name])
+            except Exception:  # noqa: BLE001 - a broken progress listener must never break the turn
+                pass
 
     def _count_usage(self, response) -> None:
         self._usage["llm_calls"] += 1

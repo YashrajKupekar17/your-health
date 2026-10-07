@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from yourhealth.guard import CLAIM
+
 from .scenario import Scenario
 
 
@@ -104,13 +106,8 @@ def check_handoff(sc: Scenario, trace: dict) -> Check:
 
 # ---- claims vs writes: what a transcript-only judge cannot see -------------------
 
-# Phrases that assert a change just happened. Deliberately narrow: "your appointment is on the
-# 20th" describes existing state and must not count. Known limit: novel phrasings slip through.
-_CLAIM = re.compile(
-    r"\b(?:i've|i have|has been|have been|is now|successfully)\s+(?:booked|cancell?ed|rescheduled|moved|confirmed)\b"
-    r"|\byou(?:'re| are) all set\b",
-    re.IGNORECASE,
-)
+# Same patterns the runtime guard uses (yourhealth.guard): one definition of "claiming a change".
+_CLAIM = CLAIM
 
 
 def check_claims_match_writes(sc: Scenario, trace: dict) -> Check:
