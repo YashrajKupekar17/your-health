@@ -105,11 +105,11 @@ def create_app(
             raise HTTPException(404, "session not found or expired; start a new conversation")
         return agent, text
 
-    def _handle(agent: Agent, text: str, on_progress=None) -> dict:
+    def _handle(agent: Agent, text: str, on_progress=None, on_delta=None) -> dict:
         started = time.perf_counter()
         with agent.lock:  # one message at a time per conversation
             seen = len(agent.session.tool_log)
-            reply = agent.respond(text, on_progress=on_progress)
+            reply = agent.respond(text, on_progress=on_progress, on_delta=on_delta)
             tools = agent.session.tool_log[seen:]
         log_event(log, "message", session=agent.session.id, ms=round((time.perf_counter() - started) * 1000, 1))
         out = {"reply": reply, "ended": agent.session.ended}
@@ -123,19 +123,23 @@ def create_app(
 
     @app.post("/api/session/{session_id}/message/stream")
     def send_stream(session_id: str, msg: Message) -> StreamingResponse:
-        """Server-sent events: `progress` while tools run, then one `done` with the guarded reply.
+        """Server-sent events: `progress` while tools run, `delta` per reply sentence, then `done`.
 
-        The reply is not streamed token by token on purpose: the output guard must see the whole
-        reply before the patient does (a token already shown cannot be taken back).
+        Each sentence is approved by the output guard before it is sent, so streaming never shows
+        the patient an unchecked claim. `done` carries the full reply as the source of truth.
         """
         agent, text = _accept(session_id, msg)
         events: queue.Queue = queue.Queue()
 
         def work() -> None:
             try:
-                events.put(
-                    ("done", _handle(agent, text, on_progress=lambda label: events.put(("progress", {"label": label}))))
+                result = _handle(
+                    agent,
+                    text,
+                    on_progress=lambda label: events.put(("progress", {"label": label})),
+                    on_delta=lambda sentence: events.put(("delta", {"text": sentence})),
                 )
+                events.put(("done", result))
             except Exception as e:  # noqa: BLE001 - surface as an SSE error event instead of a dropped stream
                 log_event(log, "stream_error", session=agent.session.id, error_type=type(e).__name__)
                 events.put(("error", {"detail": "something went wrong; please try again"}))

@@ -28,6 +28,7 @@ from .guard import check_reply
 from .logs import get_logger, log_event
 from .safety import EMERGENCY_REPLY, emergency_match
 from .settings import Settings, get_settings, validate_config
+from .streaming import SentenceStreamer, read_stream
 from .tools import TOOL_SCHEMAS, Session, dispatch
 
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
@@ -86,6 +87,7 @@ class Agent:
         self.client = client or make_client(self.settings)
         self._clock = time.monotonic  # injectable for tests
         self._on_progress: Callable[[str], None] | None = None
+        self._on_delta: Callable[[str], None] | None = None
         self.model = self.settings.agent_model or self.config["model"]
         self.lock = threading.Lock()  # callers serialise messages per conversation
         self.greeting = GREETING.format(clinic=self.session.clinic.name)
@@ -94,9 +96,18 @@ class Agent:
             {"role": "assistant", "content": self.greeting},
         ]
 
-    def respond(self, patient_text: str, on_progress: Callable[[str], None] | None = None) -> str:
-        """Handle one patient message. `on_progress(label)` is called before each tool runs."""
-        self._on_progress = on_progress
+    def respond(
+        self,
+        patient_text: str,
+        on_progress: Callable[[str], None] | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> str:
+        """Handle one patient message and return the full reply.
+
+        `on_progress(label)` is called before each tool runs. With `on_delta(sentence)`, the reply is
+        streamed sentence by sentence, each one approved by the output guard before it is sent.
+        """
+        self._on_progress, self._on_delta = on_progress, on_delta
         s = self.session
         if s.ended:
             return ENDED_REPLY
@@ -137,24 +148,31 @@ class Agent:
 
         deadline = self._clock() + self.settings.turn_deadline_s
         guard_retried = False
+        streamer = SentenceStreamer(s, self._emit) if self._on_delta else None
         for _ in range(self.config["max_tool_steps"]):
             if self._clock() > deadline:
                 dispatch(s, "handoff_to_human", {"reason": "agent turn deadline exceeded", "urgent": False})
                 return self._say(FALLBACK_REPLY), "deadline"
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    temperature=self.config["temperature"],
-                    messages=self.messages,
-                    tools=TOOL_SCHEMAS,
-                    parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
-                )
+                msg = self._complete(streamer)
             except Exception as e:  # noqa: BLE001 - any API failure must end in a handoff, never a stranded patient
                 self._error_type = type(e).__name__
                 dispatch(s, "handoff_to_human", {"reason": f"agent error: {type(e).__name__}", "urgent": False})
-                return self._say(FALLBACK_REPLY), "llm_error"
-            self._count_usage(response)
-            msg = response.choices[0].message
+                return self._say(self._finish_stream(streamer, FALLBACK_REPLY)), "llm_error"
+
+            if streamer is not None:
+                # Streaming: sentences were guarded one by one as they arrived. A blocked sentence was
+                # never shown; stop there and append the safe reply (no rewrite: text already shown stays).
+                streamer.flush()  # end of a model message: release any trailing sentence before tools run
+                if streamer.blocked is not None:
+                    log_event(
+                        log, "guard_blocked", session=s.id, turn=s.turn, kind=streamer.blocked.kind, streamed=True
+                    )
+                    return self._say(self._finish_stream(streamer, streamer.blocked.safe_reply)), "guard_fallback"
+                if msg.tool_calls is None:
+                    # History keeps this message's text; the patient has seen everything streamed this turn.
+                    self.messages.append({"role": "assistant", "content": msg.content or ""})
+                    return streamer.text, "handoff" if s.ended else "reply"
 
             if not msg.tool_calls:
                 text = msg.content or ""
@@ -192,6 +210,36 @@ class Agent:
         dispatch(s, "handoff_to_human", {"reason": "agent exceeded tool step limit", "urgent": False})
         return self._say(FALLBACK_REPLY), "step_limit"
 
+    def _complete(self, streamer: SentenceStreamer | None):
+        """One model call. Returns a message with `.content` and `.tool_calls` in either mode."""
+        request = dict(
+            model=self.model,
+            temperature=self.config["temperature"],
+            messages=self.messages,
+            tools=TOOL_SCHEMAS,
+            parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
+        )
+        if streamer is None:
+            response = self.client.chat.completions.create(**request)
+            self._count_usage(response)
+            return response.choices[0].message
+        self._usage["llm_calls"] += 1
+        chunks = self.client.chat.completions.create(**request, stream=True, stream_options={"include_usage": True})
+        return read_stream(chunks, streamer, self._add_usage)
+
+    def _emit(self, sentence: str) -> None:
+        try:
+            self._on_delta(sentence)
+        except Exception:  # noqa: BLE001 - a broken listener must never break the turn
+            pass
+
+    def _finish_stream(self, streamer: SentenceStreamer | None, tail: str) -> str:
+        """In streaming mode, send `tail` after whatever was already shown and return the full text."""
+        if streamer is None:
+            return tail
+        self._emit(tail)
+        return f"{streamer.text} {tail}".strip()
+
     def _progress(self, tool_name: str) -> None:
         if self._on_progress and tool_name in PROGRESS_LABELS:
             try:
@@ -201,7 +249,9 @@ class Agent:
 
     def _count_usage(self, response) -> None:
         self._usage["llm_calls"] += 1
-        usage = getattr(response, "usage", None)
+        self._add_usage(getattr(response, "usage", None))
+
+    def _add_usage(self, usage) -> None:
         if usage is not None:
             self._usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
             self._usage["completion_tokens"] += getattr(usage, "completion_tokens", 0) or 0

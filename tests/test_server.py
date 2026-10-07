@@ -128,9 +128,14 @@ def parse_sse(body: str) -> list[tuple[str, dict]]:
     return out
 
 
+def stream_client(*responses):
+    from tests.test_streaming import FakeStreamLLM
+
+    return TestClient(create_app(Settings(demo_mode=False), client=FakeStreamLLM(*responses)))
+
+
 def test_stream_sends_progress_then_done():
-    c = client_for(
-        False,
+    c = stream_client(
         reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
         reply(calls=[tool_call("list_my_appointments")]),
         reply("You have one appointment on Tuesday 20 October."),
@@ -138,20 +143,30 @@ def test_stream_sends_progress_then_done():
     with c.stream("POST", f"/api/session/{start(c)}/message/stream", json={"text": "Priya Sharma 1990-04-12"}) as r:
         assert r.headers["content-type"].startswith("text/event-stream")
         events = parse_sse(r.read().decode())
-    assert [e for e, _ in events] == ["progress", "progress", "done"]
+    assert [e for e, _ in events] == ["progress", "progress", "delta", "done"]
     assert events[0][1]["label"] == "Verifying your details…"
     assert events[-1][1] == {"reply": "You have one appointment on Tuesday 20 October.", "ended": False}
 
 
 def test_stream_done_reply_is_guarded():
-    c = client_for(False, reply("I've booked you in!"), reply("I've booked it."))
+    c = stream_client(reply("I've booked you in!"))
     with c.stream("POST", f"/api/session/{start(c)}/message/stream", json={"text": "book me"}) as r:
         events = parse_sse(r.read().decode())
-    assert events == [
-        ("done", {"reply": "Sorry, I haven't made any change yet. Would you like me to go ahead?", "ended": False})
-    ]
+    safe = "Sorry, I haven't made any change yet. Would you like me to go ahead?"
+    assert events == [("delta", {"text": safe}), ("done", {"reply": safe, "ended": False})]
 
 
 def test_stream_validates_like_the_plain_endpoint():
     c = client_for(False)
     assert c.post("/api/session/nope/message/stream", json={"text": "hi"}).status_code == 404
+
+
+def test_stream_sends_reply_sentences_as_deltas():
+    c = stream_client(reply("Hello. How can I help?"))
+    with c.stream("POST", f"/api/session/{start(c)}/message/stream", json={"text": "hi"}) as r:
+        events = parse_sse(r.read().decode())
+    assert events == [
+        ("delta", {"text": "Hello."}),
+        ("delta", {"text": "How can I help?"}),
+        ("done", {"reply": "Hello. How can I help?", "ended": False}),
+    ]
