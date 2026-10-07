@@ -74,3 +74,13 @@ def test_rule_ids_are_never_reused_after_retirement():
     from improve.loop import rule_id_for
 
     assert rule_id_for(4) == "R4" and rule_id_for(4) != rule_id_for(2)
+
+
+def test_versions_are_never_reused_after_a_rollback(tmp_path, monkeypatch):
+    import improve.loop as loop
+
+    monkeypatch.setattr(loop, "HISTORY_DIR", tmp_path)
+    for v in (1, 2, 3, 4):
+        (tmp_path / f"agent_v{v}.yaml").write_text("x")
+    assert loop.next_version(3) == 5  # rolled back to v3, but v4 exists: next is v5, not v4
+    assert loop.next_version(4) == 5

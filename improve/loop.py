@@ -113,6 +113,7 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
     config = load_config()
     scenarios = load_scenarios()
     version = config["version"]
+    new_version = next_version(version)  # never reuse a number, even after a rollback
     models_used = _models(config)
 
     baseline_dir = baseline_dir or find_baseline(config, len(scenarios))
@@ -181,10 +182,10 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             continue
 
         candidate = copy.deepcopy(config)
-        candidate["version"] = version + 1
+        candidate["version"] = new_version
         candidate["learned_rules"] = list(config.get("learned_rules") or []) + [
             {
-                "id": rule_id_for(version + 1),
+                "id": rule_id_for(new_version),
                 "rule": p.rule,
                 "why": p.why,
                 "fixes": p.fixes,
@@ -192,12 +193,12 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             }
         ]
 
-        _banner(3, f"RE-RUN  candidate v{version + 1} = current rules + this rule")
+        _banner(3, f"RE-RUN  candidate v{new_version} = current rules + this rule")
         # Stage 1: cheap check on the targeted scenarios only.
         target_sc = [s for s in scenarios if s.id in p.fixes]
-        stage1 = run_eval(candidate, target_sc, trials, label=f"v{version + 1}-targets")
+        stage1 = run_eval(candidate, target_sc, trials, label=f"v{new_version}-targets")
         stage1, g1 = _confirm_drops(
-            candidate, scenarios, stage1, before, p.fixes, trials, f"v{version + 1}-targets-confirm"
+            candidate, scenarios, stage1, before, p.fixes, trials, f"v{new_version}-targets-confirm"
         )
         print(f"  stage 1 (targets only): {'ok' if g1.accepted else g1.reasons}")
         if not g1.accepted:
@@ -209,14 +210,14 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             continue
 
         # Stage 2: full suite with fresh trials (train + holdout).
-        after = run_eval(candidate, scenarios, trials, label=f"v{version + 1}-candidate")
-        after, g = _confirm_drops(candidate, scenarios, after, before, p.fixes, trials, f"v{version + 1}-confirm")
+        after = run_eval(candidate, scenarios, trials, label=f"v{new_version}-candidate")
+        after, g = _confirm_drops(candidate, scenarios, after, before, p.fixes, trials, f"v{new_version}-confirm")
 
-        out = IMPROVE_RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-v{version + 1}"
+        out = IMPROVE_RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-v{new_version}"
         out.mkdir(parents=True, exist_ok=True)
         table = comparison_table(before, after, p.fixes)
         (out / "comparison.md").write_text(
-            f"# Improvement v{version} -> v{version + 1}\n\n**Rule:** {p.rule}\n\n**Why:** {p.why}\n\n"
+            f"# Improvement v{version} -> v{new_version}\n\n**Rule:** {p.rule}\n\n**Why:** {p.why}\n\n"
             f"**Learned from:** `{baseline_dir.name}` + re-run `{Path(fresh['dir']).name}` (check `{p.check}`)\n\n"
             f"**Gate:** {'passed' if g.accepted else 'FAILED: ' + '; '.join(g.reasons)}\n\n{table}\n\n"
             f"Before (pooled): train {before['summary']['train']}, holdout {before['summary'].get('holdout')}\n\n"
@@ -242,12 +243,18 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         archive(config)  # keep the previous version for rollback
         save_config(candidate)
         archive(candidate)
-        log(entry | {"decision": "accepted", "new_version": version + 1, "approved_by": approved_by})
-        print(f"\n  APPLIED: config is now v{version + 1}. Evidence: {out.relative_to(ROOT)}/comparison.md")
+        log(entry | {"decision": "accepted", "new_version": new_version, "approved_by": approved_by})
+        print(f"\n  APPLIED: config is now v{new_version}. Evidence: {out.relative_to(ROOT)}/comparison.md")
         return True
 
     print("No candidate passed. Config unchanged.")
     return False
+
+
+def next_version(current: int) -> int:
+    """One above the highest version ever archived, so a rollback never leads to overwriting history."""
+    archived = [int(f.stem.split("_v")[-1]) for f in HISTORY_DIR.glob("agent_v*.yaml")]
+    return max([current, *archived]) + 1
 
 
 def rule_id_for(new_version: int) -> str:
@@ -289,6 +296,7 @@ def ablate(rule_id: str, yes: bool = False, trials: int = 3) -> bool:
     if rule_id not in {r["id"] for r in rules}:
         raise SystemExit(f"no learned rule {rule_id}; have {[r['id'] for r in rules]}")
     version = config["version"]
+    new_version = next_version(version)  # never reuse a number, even after a rollback
     before_dir = find_baseline(config, len(scenarios))
     before = (
         json.loads((before_dir / "results.json").read_text())
@@ -296,11 +304,11 @@ def ablate(rule_id: str, yes: bool = False, trials: int = 3) -> bool:
         else run_eval(config, scenarios, trials, label=f"v{version}-baseline")
     )
     candidate = copy.deepcopy(config)
-    candidate["version"] = version + 1
+    candidate["version"] = new_version
     candidate["learned_rules"] = [r for r in rules if r["id"] != rule_id]
-    after = run_eval(candidate, scenarios, trials, label=f"v{version + 1}-without-{rule_id}")
+    after = run_eval(candidate, scenarios, trials, label=f"v{new_version}-without-{rule_id}")
     after, g = _confirm_drops(
-        candidate, scenarios, after, before, [], trials, f"v{version + 1}-without-{rule_id}-confirm"
+        candidate, scenarios, after, before, [], trials, f"v{new_version}-without-{rule_id}-confirm"
     )
     table = comparison_table(before, after, [])
     print(table)
@@ -327,8 +335,8 @@ def ablate(rule_id: str, yes: bool = False, trials: int = 3) -> bool:
     archive(config)
     save_config(candidate)
     archive(candidate)
-    log(entry | {"decision": "rule_retired", "new_version": version + 1, "approved_by": approved_by})
-    print(f"  RETIRED {rule_id}: config is now v{version + 1}.")
+    log(entry | {"decision": "rule_retired", "new_version": new_version, "approved_by": approved_by})
+    print(f"  RETIRED {rule_id}: config is now v{new_version}.")
     return True
 
 
