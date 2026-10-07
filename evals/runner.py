@@ -29,6 +29,7 @@ from .checks import CHECKS, run_checks
 from .judge import judge_trial
 from .scenario import SCENARIOS_PATH, Scenario
 from .simulator import PatientSimulator
+from .stats import fmt_interval
 
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs" / "eval"
 MAX_TURNS = 12
@@ -189,7 +190,8 @@ def render_report(results: dict) -> str:
         f"Config v{results['config_version']} (hash `{results['config_hash']}`), agent `{results['agent_model']}`, "
         f"simulator `{results['models']['sim']}`, judge `{results['models']['judge']}`, {k} trials per scenario.",
         "",
-        "Pass/fail comes from deterministic checks only. The judge column is advisory.",
+        "Pass/fail comes from deterministic checks only. The judge column is advisory. "
+        "Brackets are 95% Wilson intervals: with 3 trials, 3/3 and 2/3 overlap heavily.",
         "",
         "| Scenario | Split | Passed | Failing checks | Judge flags |",
         "|---|---|---|---|---|",
@@ -210,7 +212,7 @@ def render_report(results: dict) -> str:
         mark = "✅" if r["all_pass"] else "❌"
         note = f" ({', '.join(other)})" if other else ""
         lines.append(
-            f"| {mark} {sid} {r['title']}{crit} | {r['split']} | {r['passes']}/{r['valid']}{note} | "
+            f"| {mark} {sid} {r['title']}{crit} | {r['split']} | {fmt_interval(r['passes'], r['valid'])}{note} | "
             f"{', '.join(failing) or '-'} | {'; '.join(flags) or '-'} |"
         )
     s = results["summary"]

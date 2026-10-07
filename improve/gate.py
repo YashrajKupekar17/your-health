@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from evals.stats import sign_test
+
 
 @dataclass
 class GateResult:
@@ -60,4 +62,20 @@ def comparison_table(before: dict, after: dict, targets: list[str]) -> str:
             f"| {sid} {r['title']}{crit}{tag} | {r['split']} | {b['passes']}/{b['valid']} | "
             f"{r['passes']}/{r['valid']} | {mark} |"
         )
+    up, down = _moves(before, after)
+    lines += [
+        "",
+        f"Paired sign test over scenarios: {up} improved, {down} worsened, p = {sign_test(up, down):.3f} "
+        "(a suite-wide claim needs p < 0.05, i.e. at least 6 scenarios moving one way; smaller changes are "
+        "judged on the targeted scenarios and the holdout).",
+    ]
     return "\n".join(lines)
+
+
+def _moves(before: dict, after: dict) -> tuple[int, int]:
+    deltas = [
+        r["passes"] - before["scenarios"][sid]["passes"]
+        for sid, r in after["scenarios"].items()
+        if sid in before["scenarios"]
+    ]
+    return sum(d > 0 for d in deltas), sum(d < 0 for d in deltas)
