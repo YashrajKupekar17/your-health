@@ -122,9 +122,9 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         baseline_dir = Path(before["dir"])
     else:
         before = json.loads((baseline_dir / "results.json").read_text())
-    print(
-        f"Baseline: {baseline_dir.name}  (train {before['summary']['train']}, holdout {before['summary'].get('holdout')})"
-    )
+    _banner(1, f"RUN  eval of config v{version}: {baseline_dir.name}")
+    print(f"  train {before['summary']['train']}, holdout {before['summary'].get('holdout')}")
+    _print_failures(before)
 
     by_check = collect_failures(before, baseline_dir)
     if not by_check:
@@ -135,12 +135,14 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
     # chance (regression to the mean). Re-run them on the current config now, pool with the baseline,
     # and only learn from failures that reproduce. Candidates are compared against this pooled baseline.
     failing = sorted({i["scenario"] for items in by_check.values() for i in items})
+    print(f"  re-running {failing} to check the failures are real, not luck...")
     fresh = run_eval(config, [s for s in scenarios if s.id in failing], trials, label=f"v{version}-rebaseline")
     before = pool(before, fresh)
     before["summary"] = summarize(before)
     reproduced = {sid for sid in failing if not fresh["scenarios"][sid]["all_pass"]}
     if dropped := sorted(set(failing) - reproduced):
         print(f"  not reproduced on re-run (treated as noise): {dropped}")
+    print(f"  confirmed failures: {sorted(reproduced) or 'none'}")
     by_check = {c: [i for i in items if i["scenario"] in reproduced] for c, items in by_check.items()}
     by_check = {c: items for c, items in by_check.items() if items}
 
@@ -170,9 +172,8 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             by_check.pop(p.check if p.check in by_check else next(iter(by_check)))
             continue
 
-        print(
-            f"\n--- Attempt {attempt}: proposed rule (targets {p.fixes}, check '{p.check}')\n  {p.rule}\n  why: {p.why}"
-        )
+        _banner(2, f"IMPROVEMENT  attempt {attempt}: one rule for '{p.check}' (targets {p.fixes})")
+        print(f"  rule: {p.rule}\n  why:  {p.why}")
         if p.lint_errors:
             print(f"  REJECTED by lint: {p.lint_errors}")
             log(entry | {"decision": "rejected_lint", "reasons": p.lint_errors})
@@ -191,6 +192,7 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             }
         ]
 
+        _banner(3, f"RE-RUN  candidate v{version + 1} = current rules + this rule")
         # Stage 1: cheap check on the targeted scenarios only.
         target_sc = [s for s in scenarios if s.id in p.fixes]
         stage1 = run_eval(candidate, target_sc, trials, label=f"v{version + 1}-targets")
@@ -221,6 +223,7 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
             f"After: train {after['summary']['train']}, holdout {after['summary'].get('holdout')}\n"
         )
         (out / "after_report.md").write_text(render_report(after))
+        _banner(4, "SCORE  before -> after (rates; the baseline is pooled)")
         print(f"\n{table}\n")
         entry |= {"candidate_run": Path(after["dir"]).name, "comparison": str(out.relative_to(ROOT))}
 
@@ -240,7 +243,7 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         save_config(candidate)
         archive(candidate)
         log(entry | {"decision": "accepted", "new_version": version + 1, "approved_by": approved_by})
-        print(f"  ACCEPTED: config is now v{version + 1}. Comparison: {out.relative_to(ROOT)}/comparison.md")
+        print(f"\n  APPLIED: config is now v{version + 1}. Evidence: {out.relative_to(ROOT)}/comparison.md")
         return True
 
     print("No candidate passed. Config unchanged.")
@@ -250,6 +253,22 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
 def rule_id_for(new_version: int) -> str:
     """Rule ids come from the config version that introduced them, so a retired id is never reused."""
     return f"R{new_version}"
+
+
+def _banner(step: int, title: str) -> None:
+    print(f"\n{'=' * 78}\n[{step}/4] {title}\n{'=' * 78}")
+
+
+def _print_failures(results: dict) -> None:
+    """The eval flagging failures: which train scenarios failed, how often, and on which check."""
+    bad = [(sid, r) for sid, r in results["scenarios"].items() if r["split"] == "train" and not r["all_pass"]]
+    if not bad:
+        print("  no train failures flagged")
+    for sid, r in bad:
+        checks = sorted({c["name"] for t in r["trials"] for c in t["checks"] if not c["passed"]})
+        print(
+            f"  FAILED {sid} {r['title']}: {r['passes']}/{r['valid']} passed  (check: {', '.join(checks) or r['trials'][0]['outcome']})"
+        )
 
 
 def _approve(yes: bool, question: str) -> tuple[bool, str]:
