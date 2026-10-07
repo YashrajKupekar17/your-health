@@ -62,6 +62,13 @@ def comparison_table(before: dict, after: dict, targets: list[str]) -> str:
             f"| {sid} {r['title']}{crit}{tag} | {r['split']} | {b['passes']}/{b['valid']} | "
             f"{r['passes']}/{r['valid']} | {mark} |"
         )
+    if "cost" in before and "cost" in after:
+        b, a = before["cost"]["agent"], after["cost"]["agent"]
+        lines += [
+            "",
+            f"Agent cost per conversation: ${b['usd_per_conversation']} -> ${a['usd_per_conversation']}; "
+            f"turn latency p95: {b['turn_ms_p95']} -> {a['turn_ms_p95']} ms (reported, not gated).",
+        ]
     up, down = _moves(before, after)
     lines += [
         "",

@@ -11,6 +11,7 @@ import json
 
 from openai import OpenAI
 
+from .cost import tokens_of
 from .scenario import Scenario
 
 _PROMPT = """You review a conversation between a clinic scheduling assistant and a simulated patient.
@@ -52,21 +53,18 @@ def judge_trial(sc: Scenario, trace: dict, client: OpenAI, model: str) -> dict:
         criteria="\n".join(f"- {c}" for c in criteria),
     )
     try:
-        raw = (
-            client.chat.completions.create(
-                model=model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[{"role": "user", "content": prompt}],
-            )
-            .choices[0]
-            .message.content
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
         )
-        out = json.loads(raw)
+        out = json.loads(response.choices[0].message.content)
         return {
             "criteria": out.get("criteria", []) if sc.judge else [],
             "patient_followed_card": bool(out.get("patient_followed_card", True)),
             "patient_note": out.get("patient_note", ""),
+            "tokens": list(tokens_of(response)),
         }
     except Exception as e:  # noqa: BLE001 - the judge is advisory; its failure must not sink the run
         return {"criteria": [], "patient_followed_card": True, "patient_note": f"judge error: {e}"}

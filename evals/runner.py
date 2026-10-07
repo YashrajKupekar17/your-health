@@ -13,6 +13,7 @@ import copy
 import hashlib
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime
@@ -25,6 +26,7 @@ from yourhealth.agent import Agent, make_client
 from yourhealth.clinic import Clinic
 from yourhealth.settings import get_settings
 
+from . import cost
 from .checks import CHECKS, run_checks
 from .judge import judge_trial
 from .scenario import SCENARIOS_PATH, Scenario
@@ -68,7 +70,9 @@ def run_trial(sc: Scenario, config: dict, trial: int, client: OpenAI) -> dict:
         "turns": [],
         "error": None,
         "sim_stop_overruled": 0,
+        "usage": {"agent": [0, 0], "sim": [0, 0], "judge": [0, 0], "turn_ms": [], "llm_calls": 0},
     }
+    usage = trace["usage"]
 
     agent_text = agent.greeting
     try:
@@ -81,7 +85,15 @@ def run_trial(sc: Scenario, config: dict, trial: int, client: OpenAI) -> dict:
             if patient_text is None:
                 break
             seen = len(s.tool_log)
+            started = time.perf_counter()
             agent_text = agent.respond(patient_text)
+            usage["turn_ms"].append(round((time.perf_counter() - started) * 1000))
+            u = getattr(agent, "_usage", None) or {}
+            usage["agent"] = [
+                usage["agent"][0] + u.get("prompt_tokens", 0),
+                usage["agent"][1] + u.get("completion_tokens", 0),
+            ]
+            usage["llm_calls"] += u.get("llm_calls", 0)
             trace["turns"].append(
                 {
                     "turn": s.turn,
@@ -96,6 +108,7 @@ def run_trial(sc: Scenario, config: dict, trial: int, client: OpenAI) -> dict:
     except Exception as e:  # noqa: BLE001 - simulator/API failure: the trial is invalid, not an agent failure
         trace["error"] = f"{type(e).__name__}: {e}"
 
+    usage["sim"] = list(sim.tokens)
     if s.handoff and str(s.handoff.get("reason", "")).startswith("agent error"):
         trace["error"] = trace["error"] or s.handoff["reason"]
     trace.update(before=before, after=_snapshot(clinic), handoff=s.handoff, patients=copy.deepcopy(clinic.patients))
@@ -119,6 +132,7 @@ def grade_trial(sc: Scenario, trace: dict, client: OpenAI, use_judge: bool) -> d
         "checks": [asdict(c) for c in checks],
         "judge": judge,
         "sim_stop_overruled": trace.get("sim_stop_overruled", 0),
+        "usage": trace["usage"] | {"judge": (judge or {}).get("tokens", [0, 0])},
     }
 
 
@@ -177,6 +191,10 @@ def run_eval(
             "trials": ts,
         }
     results["summary"] = summarize(results)
+    m = models()
+    results["cost"] = cost.summarize(
+        [g["usage"] for _, g in graded], {"agent": results["agent_model"], "sim": m["sim"], "judge": m["judge"]}
+    )
     (out / "results.json").write_text(json.dumps(results, indent=2))
     (out / "report.md").write_text(render_report(results))
     results["dir"] = str(out)
@@ -243,4 +261,6 @@ def render_report(results: dict) -> str:
                 f"scenarios passing all {k} trials: {s[split]['all_pass']}"
             )
     lines.append(f"- **critical scenarios all passing**: {'yes' if s['critical_all_pass'] else 'NO'}")
+    if "cost" in results:
+        lines += ["", *cost.render(results["cost"])]
     return "\n".join(lines) + "\n"

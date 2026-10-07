@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from openai import OpenAI
 
+from .cost import tokens_of
 from .scenario import Scenario
 
 DONE = "[DONE]"
@@ -51,6 +52,7 @@ class PatientSimulator:
         )
         self.client, self.model, self.temperature = client, model, temperature
         self.history: list[dict] = []  # from the patient's point of view: agent = "user"
+        self.tokens = [0, 0]  # (in, out), for the run's cost report
 
     def reply(self, agent_text: str) -> str | None:
         """Next patient message, or None when the patient is done."""
@@ -65,15 +67,14 @@ class PatientSimulator:
         return self._next()
 
     def _next(self) -> str | None:
-        text = (
-            self.client.chat.completions.create(
-                model=self.model,
-                temperature=self.temperature,
-                messages=[{"role": "system", "content": self.system}, *self.history],
-            )
-            .choices[0]
-            .message.content.strip()
+        response = self.client.chat.completions.create(
+            model=self.model,
+            temperature=self.temperature,
+            messages=[{"role": "system", "content": self.system}, *self.history],
         )
+        used = tokens_of(response)
+        self.tokens = [self.tokens[0] + used[0], self.tokens[1] + used[1]]
+        text = response.choices[0].message.content.strip()
         if DONE in text:
             return None
         self.history.append({"role": "assistant", "content": text})

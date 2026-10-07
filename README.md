@@ -44,13 +44,14 @@ Other commands:
 ```bash
 make eval                # full suite: 15 scenarios x 3 trials, deterministic checks + advisory judge
 make eval-quick          # 1 trial, no judge
+make redflags            # emergency gate recall / over-escalation on 29 labelled messages (no LLM)
 make test                # deterministic tests, no API key needed (LLM calls are scripted)
 make lint                # ruff lint + format check (CI runs lint + tests on every push)
 uv run python -m evals --scenario S05 S13 --trials 3     # selected scenarios
 ```
 
-Each eval run writes `runs/eval/<id>/` (config snapshot, `results.json`, `report.md`, one trace per
-conversation). Each improvement attempt is appended to `improve/ledger.jsonl`, accepted or not.
+Each eval run writes `runs/eval/<id>/` (config snapshot, `results.json`, `report.md` with 95% intervals
+and a cost/latency block, one trace per conversation). Each improvement attempt is appended to `improve/ledger.jsonl`, accepted or not.
 Models can be overridden with `AGENT_MODEL`, `SIM_MODEL`, `JUDGE_MODEL`, `PROPOSER_MODEL`.
 
 ## Configuration
