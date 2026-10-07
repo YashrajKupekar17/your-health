@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dotenv import load_dotenv
+from yourhealth.settings import load_env
 
 from .loop import rollback, run_cycle
 
@@ -19,7 +19,7 @@ def main() -> None:
     p.add_argument("--baseline", type=Path, help="reuse an existing eval run as the baseline")
     p.add_argument("--attempts", type=int, default=2)
     args = p.parse_args()
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    load_env()
 
     if args.cmd == "rollback":
         rollback(args.version)

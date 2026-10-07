@@ -12,7 +12,7 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "clinic.json"
+DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "clinic.json"  # default; see settings
 SLOT_MINUTES = 30
 PARTS_OF_DAY = {"morning": (0, 12), "afternoon": (12, 24)}
 

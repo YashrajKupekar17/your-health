@@ -10,7 +10,6 @@ Per patient message:
 from __future__ import annotations
 
 import json
-import os
 import threading
 from datetime import timedelta
 from pathlib import Path
@@ -19,17 +18,18 @@ import yaml
 from openai import OpenAI
 
 from .clinic import Clinic
+from .settings import Settings, get_settings, validate_config
 from .safety import EMERGENCY_REPLY, emergency_match
 from .tools import TOOL_SCHEMAS, Session, dispatch
 
-CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "agent.yaml"
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
 GREETING = "Hi, this is {clinic}. I'm an automated scheduling assistant. How can I help you today?"
 
 
-def load_config(path: Path = CONFIG_PATH) -> dict:
-    return yaml.safe_load(Path(path).read_text())
+def load_config(path: Path | None = None) -> dict:
+    """Read and validate the agent config. Raises ConfigError with a clear message if it is malformed."""
+    return validate_config(yaml.safe_load(Path(path or get_settings().config_path).read_text()))
 
 
 def build_system_prompt(config: dict, clinic: Clinic) -> str:
@@ -43,11 +43,13 @@ def build_system_prompt(config: dict, clinic: Clinic) -> str:
 
 
 class Agent:
-    def __init__(self, config: dict | None = None, clinic: Clinic | None = None, client: OpenAI | None = None):
+    def __init__(self, config: dict | None = None, clinic: Clinic | None = None, client: OpenAI | None = None,
+                 settings: Settings | None = None):
+        self.settings = settings or get_settings()
         self.config = config or load_config()
-        self.session = Session(clinic=clinic or Clinic.load())
+        self.session = Session(clinic=clinic or Clinic.load(self.settings.clinic_data_path))
         self.client = client or OpenAI()
-        self.model = os.getenv("AGENT_MODEL", self.config["model"])
+        self.model = self.settings.agent_model or self.config["model"]
         self.lock = threading.Lock()  # callers serialise messages per conversation
         self.greeting = GREETING.format(clinic=self.session.clinic.name)
         self.messages: list[dict] = [

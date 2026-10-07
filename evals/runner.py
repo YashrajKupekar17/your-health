@@ -23,6 +23,7 @@ from openai import OpenAI
 
 from yourhealth.agent import Agent
 from yourhealth.clinic import Clinic
+from yourhealth.settings import get_settings
 
 from .checks import CHECKS, run_checks
 from .judge import judge_trial
@@ -118,7 +119,7 @@ def run_eval(config: dict, scenarios: list[Scenario], trials: int = 3, label: st
 
     results = {
         "run_id": run_id, "label": label, "config_version": config.get("version"),
-        "config_hash": config_hash(config), "agent_model": os.getenv("AGENT_MODEL", config["model"]),
+        "config_hash": config_hash(config), "agent_model": get_settings().agent_model or config["model"],
         "models": models(), "trials": trials, "harness": harness_fingerprint(), "scenarios": {},
     }
     for sc in scenarios:

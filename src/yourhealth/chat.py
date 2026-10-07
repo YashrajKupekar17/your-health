@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from dotenv import load_dotenv
-
 from .agent import Agent
+from .settings import load_env
 
 DIM, CYAN, RESET = "\033[2m", "\033[36m", "\033[0m"
 
@@ -16,7 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true", help="show tool calls and session state")
     args = parser.parse_args()
-    load_dotenv()
+    load_env()
 
     agent = Agent()
     s = agent.session

@@ -5,9 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-from yourhealth.agent import CONFIG_PATH, load_config
+from yourhealth.agent import load_config
+from yourhealth.settings import load_env
 
 from .runner import run_eval
 from .scenario import load_scenarios
@@ -20,9 +19,9 @@ def main() -> None:
     p.add_argument("--trials", type=int, default=3)
     p.add_argument("--no-judge", action="store_true", help="skip the LLM judge (faster, no simulator-error labels)")
     p.add_argument("--label", default="run")
-    p.add_argument("--config", type=Path, default=CONFIG_PATH)
+    p.add_argument("--config", type=Path, help="agent config to evaluate (default: settings.config_path)")
     args = p.parse_args()
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    load_env()
 
     scenarios = load_scenarios(ids=args.scenario, split=args.split)
     results = run_eval(load_config(args.config), scenarios, args.trials, args.label, use_judge=not args.no_judge)

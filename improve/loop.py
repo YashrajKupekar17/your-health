@@ -15,7 +15,8 @@ from openai import OpenAI
 
 from evals.runner import RUNS_DIR, config_hash, harness_fingerprint, render_report, run_eval, summarize
 from evals.scenario import load_scenarios
-from yourhealth.agent import CONFIG_PATH, load_config
+from yourhealth.agent import load_config
+from yourhealth.settings import get_settings, validate_config
 
 from .gate import comparison_table, evaluate
 from .propose import collect_failures, propose_rule
@@ -37,7 +38,9 @@ class _Literal(str):
 yaml.add_representer(_Literal, lambda d, s: d.represent_scalar("tag:yaml.org,2002:str", s, style="|"))
 
 
-def save_config(config: dict, path: Path = CONFIG_PATH) -> None:
+def save_config(config: dict, path: Path | None = None) -> None:
+    config = validate_config(config)  # never write a config the agent cannot load
+    path = path or get_settings().config_path
     data = {k: (_Literal(v) if isinstance(v, str) and "\n" in v else v) for k, v in config.items()}
     path.write_text(_HEADER + yaml.dump(data, sort_keys=False, allow_unicode=True, width=100))
 
@@ -167,6 +170,7 @@ def rollback(version: int) -> None:
     src = HISTORY_DIR / f"agent_v{version}.yaml"
     if not src.exists():
         raise SystemExit(f"no archived config v{version} in {HISTORY_DIR}")
-    shutil.copy(src, CONFIG_PATH)
+    validate_config(yaml.safe_load(src.read_text()))
+    shutil.copy(src, get_settings().config_path)
     log({"decision": "rollback", "to_version": version})
     print(f"Config rolled back to v{version}.")
