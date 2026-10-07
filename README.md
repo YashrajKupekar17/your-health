@@ -40,9 +40,9 @@ make improve             # baseline -> propose a rule from failures -> gate -> a
 Other commands:
 
 ```bash
-make eval                # full suite: 14 scenarios x 3 trials, deterministic checks + advisory judge
+make eval                # full suite: 15 scenarios x 3 trials, deterministic checks + advisory judge
 make eval-quick          # 1 trial, no judge
-make test                # 43 deterministic tests, no API key needed
+make test                # 45 deterministic tests, no API key needed
 uv run python -m evals --scenario S05 S13 --trials 3     # selected scenarios
 ```
 

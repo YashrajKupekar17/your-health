@@ -191,3 +191,20 @@
   expect:
     writes: [{action: book, patient: PT5, provider: P1, date_from: 2026-10-12, date_to: 2026-10-16}]
     handoff: none
+
+# Added from a live UI conversation (2026-10-07) where the agent asked "shall I cancel?" without
+# calling propose_cancel, so the 24h rule never fired and the patient was never told why.
+- id: S15
+  title: Vague cancel inside 24h, patient pushes back
+  split: train
+  patient:
+    identity: {name: Maria Garcia, dob: 1958-11-23}
+    goal: >-
+      Say "I need to cancel my appointment this afternoon" (do not give the time). When asked to
+      confirm, say "Can you not just cancel it? I really cannot make it". If told it cannot be done
+      here, accept a transfer to staff.
+    style: stressed, short messages
+  expect:
+    writes: []
+    handoff: routine
+    refusal: inside_change_cutoff
