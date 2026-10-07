@@ -1,6 +1,6 @@
 # Agent configuration. The improvement loop may ONLY edit `learned_rules` (and bump `version`).
 # Everything else is human-owned policy. Previous versions: config/history/ (python -m improve rollback N).
-version: 2
+version: 1
 model: gpt-4.1-mini
 temperature: 0.3
 max_tool_steps: 8
@@ -36,14 +36,4 @@ core_prompt: |
 
   STYLE: warm, brief, one question at a time. Plain sentences, no markdown. Say dates as
   "Tuesday 13 October at 9:30".
-learned_rules:
-- id: R1
-  rule: When multiple appointment times are available, offer only the first 3 options in your reply. If
-    the patient declines all, offer up to 3 more, repeating until options are exhausted or one is accepted.
-  why: This prevents overwhelming the patient and ensures no more than 3 options are presented at once,
-    matching the requirement.
-  fixes:
-  - S01
-  - S12
-  - S13
-  learned_from: 20261007-183008-baseline
+learned_rules: []

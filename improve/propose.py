@@ -22,7 +22,9 @@ MAX_RULES = 6
 
 _PROMPT = """You improve a clinic scheduling assistant. Below are its current instructions and the
 evaluation failures from its latest run. Propose ONE new rule to add to its instructions that
-would prevent the most important failure pattern.
+would prevent the most important failure pattern. Look at the exchanges to find WHEN it happens:
+restating an instruction the assistant already ignores will not change its behaviour; name the
+situation that triggers the mistake and the concrete behaviour to use instead.
 
 The rule must be general behaviour guidance (it will apply to every future patient), written as an
 instruction to the assistant. Do not mention specific patients, dates, times, ids or test scenarios.
@@ -50,6 +52,17 @@ class Proposal:
     lint_errors: list[str] = field(default_factory=list)
 
 
+def _failing_turn(trace: dict, check: dict) -> str:
+    """The exchange where the check broke (or the last one), so the proposer sees the behaviour, not a label."""
+    m = re.match(r"turn (\d+):", check["detail"])
+    turns = trace["turns"]
+    t = next((x for x in turns if m and x["turn"] == int(m.group(1))), turns[-1] if turns else None)
+    if t is None:
+        return ""
+    tools = ", ".join(f"{e['tool']}({json.dumps(e['args'])})" for e in t["tools"]) or "none"
+    return f'patient: "{t["patient"]}" | tools: {tools} | assistant: "{t["agent"]}"'
+
+
 def collect_failures(results: dict, run_dir: Path) -> dict[str, list[dict]]:
     """Train-split agent failures, grouped by failed check. Simulator/infra errors are excluded."""
     by_check: dict[str, list[dict]] = {}
@@ -59,10 +72,12 @@ def collect_failures(results: dict, run_dir: Path) -> dict[str, list[dict]]:
         for t in r["trials"]:
             if t["outcome"] != "fail":
                 continue
+            trace = json.loads((run_dir / "traces" / f"{sid}-t{t['trial']}.json").read_text())
             for c in t["checks"]:
                 if not c["passed"]:
                     by_check.setdefault(c["name"], []).append(
-                        {"scenario": sid, "title": r["title"], "trial": t["trial"], "detail": c["detail"]})
+                        {"scenario": sid, "title": r["title"], "trial": t["trial"], "detail": c["detail"],
+                         "exchange": _failing_turn(trace, c)})
     return by_check
 
 
@@ -71,7 +86,7 @@ def _render_failures(by_check: dict[str, list[dict]], limit_per_check: int = 4) 
     for check, items in sorted(by_check.items(), key=lambda kv: -len(kv[1])):
         out.append(f"## {check}: {len(items)} failed trials across {sorted({i['scenario'] for i in items})}")
         for i in items[:limit_per_check]:
-            out.append(f"- {i['scenario']} ({i['title']}), trial {i['trial']}: {i['detail'][:300]}")
+            out.append(f"- {i['scenario']} ({i['title']}), trial {i['trial']}: {i['detail'][:300]}\n  {i['exchange'][:900]}")
     return "\n".join(out)
 
 
