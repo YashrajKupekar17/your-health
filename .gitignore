@@ -3,3 +3,6 @@ __pycache__/
 .env
 .pytest_cache/
 .DS_Store
+research_notes/
+reports/
+runs/

@@ -21,7 +21,7 @@ def main() -> None:
     agent = Agent()
     s = agent.session
     print(f"{s.clinic.name} scheduling assistant (simulated now: {s.clinic.now:%a %d %b %Y %H:%M}). Ctrl-D to quit.\n")
-    print(f"{CYAN}agent>{RESET} Hi, this is {s.clinic.name}. How can I help you today?")
+    print(f"{CYAN}agent>{RESET} {agent.greeting}")
     while not s.ended:
         try:
             text = input("you> ").strip()

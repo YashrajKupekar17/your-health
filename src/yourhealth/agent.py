@@ -24,6 +24,7 @@ from .tools import TOOL_SCHEMAS, Session, dispatch
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "agent.yaml"
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
+GREETING = "Hi, this is {clinic}. I'm an automated scheduling assistant. How can I help you today?"
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
@@ -46,7 +47,11 @@ class Agent:
         self.session = Session(clinic=clinic or Clinic.load())
         self.client = client or OpenAI()
         self.model = os.getenv("AGENT_MODEL", self.config["model"])
-        self.messages: list[dict] = [{"role": "system", "content": build_system_prompt(self.config, self.session.clinic)}]
+        self.greeting = GREETING.format(clinic=self.session.clinic.name)
+        self.messages: list[dict] = [
+            {"role": "system", "content": build_system_prompt(self.config, self.session.clinic)},
+            {"role": "assistant", "content": self.greeting},
+        ]
 
     def respond(self, patient_text: str) -> str:
         s = self.session
