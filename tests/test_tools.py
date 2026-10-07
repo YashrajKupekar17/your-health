@@ -166,3 +166,39 @@ def test_handoff_quotes_caller_and_last_refusal(s):
     call(s, "handoff_to_human", reason="cancel inside 24h", urgent=False)
     assert s.handoff["caller_words"] == s.patient_messages[-3:]
     assert s.handoff["last_refusal"] == "inside_change_cutoff"
+
+
+def test_concurrent_bookings_of_one_slot_only_one_wins():
+    """Without the clinic lock this double-books and crashes ('dictionary changed size during
+    iteration') within a few trials; with it, exactly one booking ever wins."""
+    import sys
+    import threading
+
+    from yourhealth.clinic import ClinicError
+
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # switch threads aggressively to expose races
+    try:
+        for _ in range(20):
+            clinic = Clinic.load()
+            patients = ["PT1", "PT2", "PT3", "PT4", "PT5", "PT6"] * 4
+            barrier = threading.Barrier(len(patients))
+            wins, unexpected = [], []
+
+            def attempt(pid):
+                barrier.wait()
+                try:
+                    wins.append(clinic.book(pid, "P1-20261013-0930", "race"))
+                except ClinicError:
+                    pass
+                except Exception as e:  # noqa: BLE001 - any other error is a concurrency bug
+                    unexpected.append(e)
+
+            threads = [threading.Thread(target=attempt, args=(p,)) for p in patients]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            assert not unexpected and len(wins) == 1
+    finally:
+        sys.setswitchinterval(old_interval)

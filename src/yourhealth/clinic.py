@@ -8,7 +8,9 @@ agent says (slot is free, appointment belongs to the patient, change cutoff) liv
 from __future__ import annotations
 
 import copy
+import functools
 import json
+import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -42,8 +44,21 @@ def normalize_name(name: str) -> str:
     return " ".join(name.split()).casefold()
 
 
+def _locked(method):
+    """Run under the clinic's lock. Writes re-check and write atomically (no double booking when
+    conversations race); reads never see a half-applied change. A database replaces this with a
+    transaction plus a unique constraint on (provider, start) for booked appointments."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class Clinic:
     def __init__(self, data: dict):
+        self._lock = threading.RLock()
         data = copy.deepcopy(data)  # each session gets its own world
         self.name = data["clinic_name"]
         self.now = datetime.fromisoformat(data["now"])
@@ -58,11 +73,12 @@ class Clinic:
         ]
 
     @classmethod
-    def load(cls, path: Path = DATA_PATH) -> Clinic:
-        return cls(json.loads(Path(path).read_text()))
+    def load(cls, path: Path | None = None) -> Clinic:
+        return cls(json.loads(Path(path or DATA_PATH).read_text()))
 
     # ---- reads -------------------------------------------------------------
 
+    @_locked
     def find_patients(self, name: str, dob: str) -> list[dict]:
         key = normalize_name(name)
         return [p for p in self.patients.values() if normalize_name(p["name"]) == key and p["dob"] == dob.strip()]
@@ -114,6 +130,7 @@ class Clinic:
             "start": f"{start:%A %d %B %Y, %H:%M}",
         }
 
+    @_locked
     def search_slots(self, date_from: date, date_to: date, provider_id: str | None = None,
                      specialty: str | None = None, part_of_day: str | None = None, limit: int = 8) -> dict:
         if provider_id is not None and provider_id not in self.providers:
@@ -136,6 +153,7 @@ class Clinic:
             result["next_available"] = self.describe_slot(*nxt) if nxt else None
         return result
 
+    @_locked
     def upcoming_appointments(self, patient_id: str) -> list[dict]:
         mine = [a for a in self.appointments.values()
                 if a["patient_id"] == patient_id and a["status"] == "booked"
@@ -153,6 +171,7 @@ class Clinic:
 
     # ---- validation (used by both propose and commit) ----------------------
 
+    @_locked
     def check_bookable(self, patient_id: str, sid: str) -> tuple[str, datetime]:
         provider_id, start = parse_slot_id(sid)
         if not self._is_free(provider_id, start):
@@ -163,6 +182,7 @@ class Clinic:
             raise ClinicError("patient_double_booked", "The patient already has an appointment at that time.")
         return provider_id, start
 
+    @_locked
     def check_changeable(self, patient_id: str, appointment_id: str) -> dict:
         a = self.appointments.get(appointment_id)
         # Same error whether it does not exist or belongs to someone else: no leaking.
@@ -181,6 +201,7 @@ class Clinic:
 
     # ---- writes ------------------------------------------------------------
 
+    @_locked
     def book(self, patient_id: str, sid: str, reason: str) -> dict:
         provider_id, start = self.check_bookable(patient_id, sid)
         new_id = f"A{1001 + len(self.appointments)}"
@@ -189,11 +210,13 @@ class Clinic:
         self.appointments[new_id] = a
         return a
 
+    @_locked
     def cancel(self, patient_id: str, appointment_id: str) -> dict:
         a = self.check_changeable(patient_id, appointment_id)
         a["status"] = "cancelled"
         return a
 
+    @_locked
     def reschedule(self, patient_id: str, appointment_id: str, sid: str) -> dict:
         a = self.check_changeable(patient_id, appointment_id)
         provider_id, start = self.check_bookable(patient_id, sid)
