@@ -73,7 +73,7 @@
   </div>
   <aside>
     <section class="card">
-      <h2>Session state (enforced in code)</h2>
+      <h2>Session state (enforced in code) · handoff record staff receive</h2>
       <dl id="state"></dl>
     </section>
     <section class="card">
@@ -125,7 +125,11 @@ function renderState(st) {
     ["Pending action", st.pending || "none"],
     ["Handoff", st.handoff ? `${st.handoff.urgent ? "URGENT: " : ""}${st.handoff.reason}` : "none"],
   ];
-  $("state").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  if (st.handoff) {
+    rows.push(["Last refusal", st.handoff.last_refusal || "none"]);
+    rows.push(["Caller's words", (st.handoff.caller_words || []).map((w) => `“${w}”`).join("\n")]);
+  }
+  $("state").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd style="white-space:pre-wrap">${esc(v)}</dd>`).join("");
   $("appts").innerHTML = st.appointments.length
     ? "<table>" + st.appointments.map((a) => `<tr><td>${esc(a.appointment_id)}</td><td>${esc(a.start)}<br><span class="muted">${esc(a.provider)}</span></td></tr>`).join("") + "</table>"
     : `<span class="muted">${st.verified_patient ? "No upcoming appointments." : "Nobody verified yet."}</span>`;

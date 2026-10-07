@@ -157,3 +157,12 @@ def test_handoff_carries_context(s):
     call(s, "propose_cancel", appointment_id="A1003")
     call(s, "handoff_to_human", reason="wants a person", urgent=False)
     assert s.handoff["patient_id"] == "PT1" and s.handoff["pending"].startswith("Cancel")
+
+
+def test_handoff_quotes_caller_and_last_refusal(s):
+    s.patient_messages += ["hi", "I'm Maria Garcia, 1958-11-23", "cancel my 2:30 today please", "can't you just do it?"]
+    verify(s, "Maria Garcia", "1958-11-23")
+    call(s, "propose_cancel", appointment_id="A1002")  # inside the 24h cutoff
+    call(s, "handoff_to_human", reason="cancel inside 24h", urgent=False)
+    assert s.handoff["caller_words"] == s.patient_messages[-3:]
+    assert s.handoff["last_refusal"] == "inside_change_cutoff"

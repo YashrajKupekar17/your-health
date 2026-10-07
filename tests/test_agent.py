@@ -41,6 +41,7 @@ def test_emergency_gate_skips_llm():
     assert a.respond("I have crushing chest pain right now") == EMERGENCY_REPLY
     assert a.client.calls == 0
     assert a.session.handoff["urgent"] is True
+    assert a.session.handoff["caller_words"] == ["I have crushing chest pain right now"]
 
 
 def test_emergency_gate_fires_mid_booking():

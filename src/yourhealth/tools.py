@@ -19,6 +19,7 @@ from datetime import date
 from .clinic import Clinic, ClinicError
 
 MAX_VERIFY_ATTEMPTS = 3
+HANDOFF_QUOTE_MESSAGES = 3
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Session:
     pending: Pending | None = None
     handoff: dict | None = None  # set by handoff_to_human; ends the conversation
     tool_log: list[dict] = field(default_factory=list)
+    patient_messages: list[str] = field(default_factory=list)  # verbatim, for the staff handoff
 
     @property
     def ended(self) -> bool:
@@ -155,9 +157,12 @@ def confirm_pending(s: Session) -> dict:
 
 
 def handoff_to_human(s: Session, reason: str, urgent: bool) -> dict:
-    # What a human picking this up needs: why, who (if verified), and what was in flight.
+    # What a human picking this up needs: why it stopped, in the caller's own words, who (if
+    # verified), what was in flight, and the last rule the system enforced (not the model's account).
+    last_refusal = next((e["result"]["error"] for e in reversed(s.tool_log) if not e["result"].get("ok")), None)
     s.handoff = {"reason": reason, "urgent": urgent, "patient_id": s.patient_id,
-                 "pending": s.pending.summary if s.pending else None, "turn": s.turn}
+                 "pending": s.pending.summary if s.pending else None, "turn": s.turn,
+                 "caller_words": s.patient_messages[-HANDOFF_QUOTE_MESSAGES:], "last_refusal": last_refusal}
     s.pending = None
     return ok(transferred=True, next_step="Tell the patient a staff member will take over, then stop.")
 

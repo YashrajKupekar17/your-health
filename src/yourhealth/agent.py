@@ -60,6 +60,7 @@ class Agent:
         if s.ended:
             return ENDED_REPLY
         s.turn += 1
+        s.patient_messages.append(patient_text)
         self.messages.append({"role": "user", "content": patient_text})
 
         if hit := emergency_match(patient_text):
