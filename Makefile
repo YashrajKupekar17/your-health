@@ -1,4 +1,4 @@
-.PHONY: install chat test eval eval-quick
+.PHONY: install chat test eval eval-quick improve improve-auto
 
 install:
 	uv sync
@@ -14,3 +14,9 @@ eval:            ## full suite: all scenarios, 3 trials, with judge
 
 eval-quick:      ## 1 trial, no judge
 	uv run python -m evals --trials 1 --no-judge --label quick
+
+improve:         ## one improvement cycle: propose -> gate -> ask -> apply
+	uv run python -m improve
+
+improve-auto:    ## same, apply automatically if the gate passes (for demos)
+	uv run python -m improve --yes
