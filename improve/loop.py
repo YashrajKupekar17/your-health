@@ -15,7 +15,7 @@ from openai import OpenAI
 
 from evals.runner import RUNS_DIR, config_hash, harness_fingerprint, render_report, run_eval, summarize
 from evals.scenario import load_scenarios
-from yourhealth.agent import load_config
+from yourhealth.agent import load_config, make_client
 from yourhealth.settings import get_settings, validate_config
 
 from .gate import comparison_table, evaluate
@@ -70,7 +70,7 @@ def find_baseline(config: dict, n_scenarios: int) -> Path | None:
 
 
 def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts: int = 2, trials: int = 3) -> bool:
-    client = OpenAI(max_retries=3)
+    client = make_client(get_settings())
     config = load_config()
     scenarios = load_scenarios()
     version = config["version"]

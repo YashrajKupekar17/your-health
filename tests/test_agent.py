@@ -3,7 +3,8 @@
 import json
 from types import SimpleNamespace as NS
 
-from yourhealth.agent import FALLBACK_REPLY, Agent, build_system_prompt, load_config
+from yourhealth.agent import FALLBACK_REPLY, TOO_LONG_REPLY, Agent, build_system_prompt, load_config, make_client
+from yourhealth.settings import Settings
 from yourhealth.clinic import Clinic
 from yourhealth.safety import EMERGENCY_REPLY, emergency_match
 
@@ -90,3 +91,27 @@ def test_gate_phrases():
         assert emergency_match(text), text
     for text in ["book a checkup", "I need my skin rash looked at", "can I see Dr Chen"]:
         assert not emergency_match(text), text
+
+
+def test_conversation_turn_limit_hands_off():
+    a = Agent(client=FakeLLM(reply("ok"), reply("ok")), settings=Settings(max_turns=2))
+    a.respond("one")
+    a.respond("two")
+    assert a.respond("three") == TOO_LONG_REPLY
+    assert a.session.handoff["reason"] == "conversation turn limit reached"
+
+
+def test_turn_deadline_hands_off():
+    a = Agent(client=FakeLLM(*[reply(calls=[tool_call("list_providers", specialty=None)])] * 5),
+              settings=Settings(turn_deadline_s=10))
+    ticks = iter([0, 4, 8, 12, 16])  # each LLM step "takes" 4 seconds
+    a._clock = lambda: next(ticks)
+    assert a.respond("hi") == FALLBACK_REPLY
+    assert a.session.handoff["reason"] == "agent turn deadline exceeded"
+    assert a.client.calls == 2  # deadline at t=10: calls at t=4 and t=8, stops at t=12 (not after 8 steps)
+
+
+def test_client_has_explicit_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-not-used")
+    c = make_client(Settings(llm_timeout_s=7, llm_max_retries=1))
+    assert c.timeout == 7 and c.max_retries == 1

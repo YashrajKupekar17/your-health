@@ -21,7 +21,7 @@ from pathlib import Path
 import yaml
 from openai import OpenAI
 
-from yourhealth.agent import Agent
+from yourhealth.agent import Agent, make_client
 from yourhealth.clinic import Clinic
 from yourhealth.settings import get_settings
 
@@ -98,7 +98,7 @@ def grade_trial(sc: Scenario, trace: dict, client: OpenAI, use_judge: bool) -> d
 
 def run_eval(config: dict, scenarios: list[Scenario], trials: int = 3, label: str = "run",
              use_judge: bool = True, concurrency: int | None = None, client: OpenAI | None = None) -> dict:
-    client = client or OpenAI(max_retries=3)
+    client = client or make_client(get_settings())
     run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{label}"
     out = RUNS_DIR / run_id
     (out / "traces").mkdir(parents=True, exist_ok=True)

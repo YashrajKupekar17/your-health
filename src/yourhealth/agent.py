@@ -4,13 +4,15 @@ Per patient message:
   1. turn += 1 (this is what lets confirm_pending tell a later turn from the same turn)
   2. emergency gate (code) -> fixed reply + urgent handoff, LLM never runs
   3. LLM <-> tools loop, capped at max_tool_steps
-  4. if the cap is hit or the API fails, hand off rather than leave the patient stuck
+  4. if the step cap, the turn deadline or the conversation turn limit is hit, or the API fails,
+     hand off rather than leave the patient stuck. Every LLM request also has its own timeout.
 """
 
 from __future__ import annotations
 
 import json
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -24,12 +26,18 @@ from .tools import TOOL_SCHEMAS, Session, dispatch
 
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
+TOO_LONG_REPLY = "We've covered a lot. Let me connect you with our front desk so they can finish this with you."
 GREETING = "Hi, this is {clinic}. I'm an automated scheduling assistant. How can I help you today?"
 
 
 def load_config(path: Path | None = None) -> dict:
     """Read and validate the agent config. Raises ConfigError with a clear message if it is malformed."""
     return validate_config(yaml.safe_load(Path(path or get_settings().config_path).read_text()))
+
+
+def make_client(settings: Settings) -> OpenAI:
+    """OpenAI client with an explicit per-request timeout and bounded retries (SDK default is 600s)."""
+    return OpenAI(timeout=settings.llm_timeout_s, max_retries=settings.llm_max_retries)
 
 
 def build_system_prompt(config: dict, clinic: Clinic) -> str:
@@ -48,7 +56,8 @@ class Agent:
         self.settings = settings or get_settings()
         self.config = config or load_config()
         self.session = Session(clinic=clinic or Clinic.load(self.settings.clinic_data_path))
-        self.client = client or OpenAI()
+        self.client = client or make_client(self.settings)
+        self._clock = time.monotonic  # injectable for tests
         self.model = self.settings.agent_model or self.config["model"]
         self.lock = threading.Lock()  # callers serialise messages per conversation
         self.greeting = GREETING.format(clinic=self.session.clinic.name)
@@ -65,11 +74,19 @@ class Agent:
         s.patient_messages.append(patient_text)
         self.messages.append({"role": "user", "content": patient_text})
 
+        if s.turn > self.settings.max_turns:
+            dispatch(s, "handoff_to_human", {"reason": "conversation turn limit reached", "urgent": False})
+            return self._say(TOO_LONG_REPLY)
+
         if hit := emergency_match(patient_text):
             dispatch(s, "handoff_to_human", {"reason": f"emergency gate: '{hit}'", "urgent": True})
             return self._say(EMERGENCY_REPLY)
 
+        deadline = self._clock() + self.settings.turn_deadline_s
         for _ in range(self.config["max_tool_steps"]):
+            if self._clock() > deadline:
+                dispatch(s, "handoff_to_human", {"reason": "agent turn deadline exceeded", "urgent": False})
+                return self._say(FALLBACK_REPLY)
             try:
                 msg = self.client.chat.completions.create(
                     model=self.model,
