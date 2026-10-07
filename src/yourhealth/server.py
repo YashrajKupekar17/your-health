@@ -11,11 +11,14 @@ patient list never leave the server.
 
 from __future__ import annotations
 
+import json
+import queue
+import threading
 import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .agent import Agent, load_config, make_client
@@ -93,24 +96,60 @@ def create_app(
             out["state"] = _state(agent)
         return out
 
-    @app.post("/api/session/{session_id}/message")
-    def send(session_id: str, msg: Message) -> dict:
+    def _accept(session_id: str, msg: Message) -> tuple[Agent, str]:
         text = msg.text.strip()
         if not text or len(text) > settings.max_message_chars:
             raise HTTPException(422, f"message must be 1-{settings.max_message_chars} characters")
         agent = store.get(session_id)
         if agent is None:
             raise HTTPException(404, "session not found or expired; start a new conversation")
+        return agent, text
+
+    def _handle(agent: Agent, text: str, on_progress=None) -> dict:
         started = time.perf_counter()
         with agent.lock:  # one message at a time per conversation
             seen = len(agent.session.tool_log)
-            reply = agent.respond(text)
+            reply = agent.respond(text, on_progress=on_progress)
             tools = agent.session.tool_log[seen:]
-        log_event(log, "message", session=session_id, ms=round((time.perf_counter() - started) * 1000, 1))
+        log_event(log, "message", session=agent.session.id, ms=round((time.perf_counter() - started) * 1000, 1))
         out = {"reply": reply, "ended": agent.session.ended}
         if settings.demo_mode:
             out |= {"tools": tools, "state": _state(agent)}
         return out
+
+    @app.post("/api/session/{session_id}/message")
+    def send(session_id: str, msg: Message) -> dict:
+        return _handle(*_accept(session_id, msg))
+
+    @app.post("/api/session/{session_id}/message/stream")
+    def send_stream(session_id: str, msg: Message) -> StreamingResponse:
+        """Server-sent events: `progress` while tools run, then one `done` with the guarded reply.
+
+        The reply is not streamed token by token on purpose: the output guard must see the whole
+        reply before the patient does (a token already shown cannot be taken back).
+        """
+        agent, text = _accept(session_id, msg)
+        events: queue.Queue = queue.Queue()
+
+        def work() -> None:
+            try:
+                events.put(
+                    ("done", _handle(agent, text, on_progress=lambda label: events.put(("progress", {"label": label}))))
+                )
+            except Exception as e:  # noqa: BLE001 - surface as an SSE error event instead of a dropped stream
+                log_event(log, "stream_error", session=agent.session.id, error_type=type(e).__name__)
+                events.put(("error", {"detail": "something went wrong; please try again"}))
+            finally:
+                events.put(None)
+
+        threading.Thread(target=work, daemon=True).start()
+
+        def stream():
+            while (item := events.get()) is not None:
+                event, data = item
+                yield f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
     return app
 

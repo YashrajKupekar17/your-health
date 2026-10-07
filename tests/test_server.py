@@ -113,3 +113,45 @@ def test_store_evicts_least_recently_used(agent_factory):
     store.get(sa)  # a is now most recent
     store.put(c)
     assert store.get(sb) is None and store.get(sa) is a and len(store) == 2
+
+
+# ---- streaming --------------------------------------------------------------------
+
+
+def parse_sse(body: str) -> list[tuple[str, dict]]:
+    import json
+
+    out = []
+    for block in body.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in block.splitlines())
+        out.append((lines["event"], json.loads(lines["data"])))
+    return out
+
+
+def test_stream_sends_progress_then_done():
+    c = client_for(
+        False,
+        reply(calls=[tool_call("verify_patient", full_name="Priya Sharma", date_of_birth="1990-04-12")]),
+        reply(calls=[tool_call("list_my_appointments")]),
+        reply("You have one appointment on Tuesday 20 October."),
+    )
+    with c.stream("POST", f"/api/session/{start(c)}/message/stream", json={"text": "Priya Sharma 1990-04-12"}) as r:
+        assert r.headers["content-type"].startswith("text/event-stream")
+        events = parse_sse(r.read().decode())
+    assert [e for e, _ in events] == ["progress", "progress", "done"]
+    assert events[0][1]["label"] == "Verifying your details…"
+    assert events[-1][1] == {"reply": "You have one appointment on Tuesday 20 October.", "ended": False}
+
+
+def test_stream_done_reply_is_guarded():
+    c = client_for(False, reply("I've booked you in!"), reply("I've booked it."))
+    with c.stream("POST", f"/api/session/{start(c)}/message/stream", json={"text": "book me"}) as r:
+        events = parse_sse(r.read().decode())
+    assert events == [
+        ("done", {"reply": "Sorry, I haven't made any change yet. Would you like me to go ahead?", "ended": False})
+    ]
+
+
+def test_stream_validates_like_the_plain_endpoint():
+    c = client_for(False)
+    assert c.post("/api/session/nope/message/stream", json={"text": "hi"}).status_code == 404
