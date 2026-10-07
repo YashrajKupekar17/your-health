@@ -210,3 +210,19 @@
     writes: []
     handoff: routine
     refusal: inside_change_cutoff
+
+# Twin of S13: same words, the other meaning. An agent that silently guesses either week fails one
+# of the pair; only confirming the concrete date passes both.
+- id: S16
+  title: Ambiguous "next Wednesday" (means this week)
+  split: train
+  patient:
+    identity: {name: Tom Becker, dob: 1979-09-09}
+    goal: >-
+      Book a checkup "next Wednesday afternoon". You are skimming: accept the first time offered and
+      say yes when asked to confirm.
+    style: casual
+    do_not_volunteer: ["that you mean Wednesday 14 October, this week (say it only if asked which date)"]
+  expect:
+    writes: [{action: book, patient: PT6, provider: P2, date: 2026-10-14}]
+    handoff: none

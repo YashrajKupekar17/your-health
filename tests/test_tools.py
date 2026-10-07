@@ -212,3 +212,8 @@ def test_concurrent_bookings_of_one_slot_only_one_wins():
             assert not unexpected and len(wins) == 1
     finally:
         sys.setswitchinterval(old_interval)
+
+
+def test_search_returns_at_most_three_and_says_how_many_exist(s):
+    r = search(s, provider_id="P1")
+    assert len(r["slots"]) == 3 and r["total_matching"] > 3

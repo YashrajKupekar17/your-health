@@ -34,6 +34,7 @@ from .simulator import PatientSimulator
 from .stats import fmt_interval
 
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs" / "eval"
+AGENT_SRC = Path(__file__).resolve().parents[1] / "src" / "yourhealth"
 MAX_TURNS = 12
 
 
@@ -46,10 +47,16 @@ def config_hash(config: dict) -> str:
 
 
 def harness_fingerprint() -> dict:
-    """What a result was graded against. Two runs are only comparable if this matches."""
+    """What a result depends on besides the config. Two runs are only comparable if this matches:
+    the scenarios, the checks, and the agent's code (a tool change alters behaviour without touching
+    the config, so an old baseline would silently stop being comparable)."""
+    code = hashlib.sha256()
+    for f in sorted(AGENT_SRC.glob("*.py")):
+        code.update(f.read_bytes())
     return {
         "scenarios_hash": hashlib.sha256(SCENARIOS_PATH.read_bytes()).hexdigest()[:10],
         "checks": [fn.__name__ for fn in CHECKS],
+        "agent_code_hash": code.hexdigest()[:10],
     }
 
 

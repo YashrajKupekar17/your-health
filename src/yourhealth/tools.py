@@ -249,7 +249,9 @@ _REGISTRY = [
     ),
     _fn(
         "search_slots",
-        "Find free appointment slots in a date range. Only offer slots returned by this tool.",
+        "Find free appointment slots in a date range. Returns the 3 earliest matches and how many exist in "
+        "total; to see others, narrow or move the date range, part of day or provider. Only offer slots "
+        "returned by this tool.",
         {
             "date_from": {"type": "string", "description": "YYYY-MM-DD"},
             "date_to": {"type": "string", "description": "YYYY-MM-DD"},

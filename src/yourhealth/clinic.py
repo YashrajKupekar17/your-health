@@ -143,7 +143,7 @@ class Clinic:
         provider_id: str | None = None,
         specialty: str | None = None,
         part_of_day: str | None = None,
-        limit: int = 8,
+        limit: int = 3,  # never more than a patient can take in at once; total_matching says how many exist
     ) -> dict:
         if provider_id is not None and provider_id not in self.providers:
             raise ClinicError("unknown_provider", f"No provider with id '{provider_id}'. Use list_providers.")

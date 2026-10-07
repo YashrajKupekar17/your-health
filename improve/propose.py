@@ -1,8 +1,10 @@
 """Turn eval failures into ONE structured, linted rule for the prompt's learned_rules section.
 
 What the proposer sees: train-split failures only (never holdout, never the judge rubric),
-each with the failed check's name and detail and the agent turn that broke it. What it may
-change: nothing but a new learned rule. Core policy, tools and code are out of its reach.
+each with the failed check's name and detail and the agent turn that broke it, plus rules rejected
+in earlier cycles. What it may change: nothing but a new learned rule. It must first say where the
+fix belongs; anything that belongs in a tool, in code or in the eval becomes a ticket for a human,
+not a prompt rule (a prompt patch over a code problem is a soft fix that drifts).
 """
 
 from __future__ import annotations
@@ -19,10 +21,20 @@ from yourhealth.clinic import Clinic
 
 MAX_RULE_WORDS = 40
 MAX_RULES = 6
+FIX_TYPES = {"prompt", "tool", "code", "eval"}
 
 _PROMPT = """You improve a clinic scheduling assistant. Below are its current instructions and the
-evaluation failures from its latest run. Propose ONE new rule to add to its instructions that
-would prevent the most important failure pattern. Look at the exchanges to find WHEN it happens:
+evaluation failures from its latest run. Take the most important failure pattern.
+
+FIRST decide where its fix belongs (fix_type):
+- "prompt": conversational judgment the instructions can change (what to ask, when to confirm, order
+  of steps, how to handle ambiguity).
+- "tool": a tool returns too much, too little or the wrong shape (e.g. an output size limit).
+- "code": a hard rule that must always hold (countable limits, date arithmetic, validation, policy).
+- "eval": the scenario, simulator or check itself looks wrong.
+Only for "prompt" write a rule. Otherwise leave "rule" empty and say in "note" what a human should change.
+
+If it is a prompt fix, propose ONE new rule that would prevent it. Look at the exchanges to find WHEN it happens:
 restating an instruction the assistant already ignores will not change its behaviour; name the
 situation that triggers the mistake and the concrete behaviour to use instead.
 
@@ -39,8 +51,9 @@ CURRENT LEARNED RULES:
 
 FAILURES (grouped by the check that failed):
 {failures}
-{feedback}
-Reply as JSON: {{"rule": str, "why": str, "fixes": [scenario ids this should fix], "check": the failed check name it targets}}"""
+{rejected}{feedback}
+Reply as JSON: {{"fix_type": "prompt"|"tool"|"code"|"eval", "rule": str, "why": str, "note": str,
+"fixes": [scenario ids this should fix], "check": the failed check name it targets}}"""
 
 
 @dataclass
@@ -49,6 +62,8 @@ class Proposal:
     why: str
     fixes: list[str]
     check: str
+    fix_type: str = "prompt"
+    note: str = ""
     lint_errors: list[str] = field(default_factory=list)
 
 
@@ -122,13 +137,27 @@ def lint(rule: str, existing: list[dict]) -> list[str]:
     return errors
 
 
-def propose_rule(config: dict, by_check: dict[str, list[dict]], client: OpenAI, feedback: str = "") -> Proposal:
+def propose_rule(
+    config: dict,
+    by_check: dict[str, list[dict]],
+    client: OpenAI,
+    feedback: str = "",
+    rejected: list[dict] | None = None,
+) -> Proposal:
+    rejected_text = ""
+    if rejected:
+        rejected_text = (
+            "\nPREVIOUSLY REJECTED RULES (do not propose these or close variants again):\n"
+            + "\n".join(f"- {r['rule']} -> {r['reason']}" for r in rejected)
+            + "\n"
+        )
     prompt = _PROMPT.format(
         max_words=MAX_RULE_WORDS,
         core_prompt=config["core_prompt"],
         rules="\n".join(f"- {r['rule']}" for r in config.get("learned_rules") or []) or "(none)",
         failures=_render_failures(by_check),
-        feedback=f"\nA PREVIOUS ATTEMPT WAS REJECTED: {feedback}\n" if feedback else "",
+        feedback=f"\nA PREVIOUS ATTEMPT IN THIS CYCLE WAS REJECTED: {feedback}\n" if feedback else "",
+        rejected=rejected_text,
     )
     raw = (
         client.chat.completions.create(
@@ -146,9 +175,14 @@ def propose_rule(config: dict, by_check: dict[str, list[dict]], client: OpenAI, 
         why=str(data.get("why", "")).strip(),
         fixes=[str(x) for x in data.get("fixes", [])],
         check=str(data.get("check", "")),
+        fix_type=str(data.get("fix_type", "prompt")).strip().lower(),
+        note=str(data.get("note", "")).strip(),
     )
     # The proposer may only claim scenarios it was shown failing.
     shown = {i["scenario"] for items in by_check.values() for i in items}
     p.fixes = [f for f in p.fixes if f in shown] or sorted(shown)
-    p.lint_errors = lint(p.rule, config.get("learned_rules") or [])
+    if p.fix_type not in FIX_TYPES:
+        p.fix_type = "prompt"
+    if p.fix_type == "prompt":
+        p.lint_errors = lint(p.rule, config.get("learned_rules") or [])
     return p
