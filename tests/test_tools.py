@@ -145,3 +145,15 @@ def test_every_schema_is_strict():
         params = t["function"]["parameters"]
         assert params["additionalProperties"] is False
         assert set(params["required"]) == set(params["properties"])
+
+
+def test_duplicate_identity_is_never_guessed(s):
+    s.clinic.patients["PT7"] = {"id": "PT7", "name": "Priya Sharma", "dob": "1990-04-12", "phone": "555-0199"}
+    assert verify(s)["error"] == "ambiguous_identity" and s.patient_id is None
+
+
+def test_handoff_carries_context(s):
+    verify(s)
+    call(s, "propose_cancel", appointment_id="A1003")
+    call(s, "handoff_to_human", reason="wants a person", urgent=False)
+    assert s.handoff["patient_id"] == "PT1" and s.handoff["pending"].startswith("Cancel")

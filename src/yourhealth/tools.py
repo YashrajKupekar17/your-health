@@ -71,7 +71,10 @@ def verify_patient(s: Session, full_name: str, date_of_birth: str) -> dict:
     if s.failed_verifications >= MAX_VERIFY_ATTEMPTS:
         return err("verification_locked", "Too many failed attempts. Do not try again; offer to transfer to the front desk.")
     matches = s.clinic.find_patients(full_name, date_of_birth)
-    if len(matches) != 1:
+    if len(matches) > 1:
+        # Two records share name + DOB: picking one risks acting on the wrong patient.
+        return err("ambiguous_identity", "More than one record matches. Do not guess; transfer to the front desk.")
+    if not matches:
         s.failed_verifications += 1
         # Same message for "no such name" and "wrong DOB": never confirm a name exists.
         return err("not_verified", "No record matches that name and date of birth. Ask the patient to check both. "
@@ -152,7 +155,9 @@ def confirm_pending(s: Session) -> dict:
 
 
 def handoff_to_human(s: Session, reason: str, urgent: bool) -> dict:
-    s.handoff = {"reason": reason, "urgent": urgent}
+    # What a human picking this up needs: why, who (if verified), and what was in flight.
+    s.handoff = {"reason": reason, "urgent": urgent, "patient_id": s.patient_id,
+                 "pending": s.pending.summary if s.pending else None, "turn": s.turn}
     s.pending = None
     return ok(transferred=True, next_step="Tell the patient a staff member will take over, then stop.")
 
