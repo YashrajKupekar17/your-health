@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from evals.checks import check_claims_match_writes, check_max_options, check_end_state, check_handoff, check_no_leak, diff_appointments
+from evals.checks import check_claims_match_writes, check_expected_refusal, check_max_options, check_end_state, check_handoff, check_no_leak, diff_appointments
 from evals.scenario import Scenario, load_scenarios
 from yourhealth.clinic import Clinic
 
@@ -82,3 +82,11 @@ def test_max_options(clinic):
     six = [turn("Times: 2:00, 2:30, 3:00, 3:30, 4:00 and 4:30.")]
     assert check_max_options(scenario(), trace(clinic, {}, three)).passed
     assert not check_max_options(scenario(), trace(clinic, {}, six)).passed
+
+
+def test_expected_refusal(clinic):
+    refused = {"tool": "propose_cancel", "args": {}, "result": {"ok": False, "error": "inside_change_cutoff"}}
+    sc = scenario(refusal="inside_change_cutoff", handoff="routine")
+    assert check_expected_refusal(sc, trace(clinic, {}, [turn("That's within 24 hours.", [refused])])).passed
+    assert not check_expected_refusal(sc, trace(clinic, {}, [turn("Shall I cancel it?")])).passed
+    assert check_expected_refusal(scenario(), trace(clinic, {}, [])).passed  # not required

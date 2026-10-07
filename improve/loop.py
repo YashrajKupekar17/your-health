@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 from openai import OpenAI
 
-from evals.runner import RUNS_DIR, config_hash, render_report, run_eval, summarize
+from evals.runner import RUNS_DIR, config_hash, harness_fingerprint, render_report, run_eval, summarize
 from evals.scenario import load_scenarios
 from yourhealth.agent import CONFIG_PATH, load_config
 
@@ -55,12 +55,13 @@ def log(entry: dict) -> None:
 
 
 def find_baseline(config: dict, n_scenarios: int) -> Path | None:
-    """Most recent full eval run made with exactly this config."""
+    """Most recent full eval run made with exactly this config AND graded by the current scenarios/checks."""
     for d in sorted(RUNS_DIR.glob("*"), reverse=True):
         f = d / "results.json"
         if f.exists():
             r = json.loads(f.read_text())
-            if r["config_hash"] == config_hash(config) and len(r["scenarios"]) == n_scenarios:
+            if (r["config_hash"] == config_hash(config) and r.get("harness") == harness_fingerprint()
+                    and len(r["scenarios"]) == n_scenarios):
                 return d
     return None
 

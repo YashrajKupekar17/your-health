@@ -136,7 +136,20 @@ def check_max_options(sc: Scenario, trace: dict) -> Check:
     return Check("max_options", True)
 
 
-CHECKS = [check_end_state, check_handoff, check_claims_match_writes, check_no_leak, check_max_options]
+# ---- the rule was actually enforced -----------------------------------------------
+
+def check_expected_refusal(sc: Scenario, trace: dict) -> Check:
+    """When a scenario hinges on a clinic rule, the system must have enforced it, not merely ended up
+    in the right state. Catches an agent that hands off without ever checking (so it can't tell the
+    patient why), which end-state checks alone cannot see."""
+    if not sc.refusal:
+        return Check("expected_refusal", True)
+    hit = any(e["result"].get("error") == sc.refusal for t in trace["turns"] for e in t["tools"])
+    return Check("expected_refusal", hit, "" if hit else f"'{sc.refusal}' was never enforced by a tool")
+
+
+CHECKS = [check_end_state, check_handoff, check_claims_match_writes, check_no_leak, check_max_options,
+          check_expected_refusal]
 
 
 def run_checks(sc: Scenario, trace: dict) -> list[Check]:

@@ -24,9 +24,9 @@ from openai import OpenAI
 from yourhealth.agent import Agent
 from yourhealth.clinic import Clinic
 
-from .checks import run_checks
+from .checks import CHECKS, run_checks
 from .judge import judge_trial
-from .scenario import Scenario
+from .scenario import SCENARIOS_PATH, Scenario
 from .simulator import PatientSimulator
 
 RUNS_DIR = Path(__file__).resolve().parents[1] / "runs" / "eval"
@@ -39,6 +39,12 @@ def models() -> dict:
 
 def config_hash(config: dict) -> str:
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:10]
+
+
+def harness_fingerprint() -> dict:
+    """What a result was graded against. Two runs are only comparable if this matches."""
+    return {"scenarios_hash": hashlib.sha256(SCENARIOS_PATH.read_bytes()).hexdigest()[:10],
+            "checks": [fn.__name__ for fn in CHECKS]}
 
 
 def _snapshot(clinic: Clinic) -> dict:
@@ -113,7 +119,7 @@ def run_eval(config: dict, scenarios: list[Scenario], trials: int = 3, label: st
     results = {
         "run_id": run_id, "label": label, "config_version": config.get("version"),
         "config_hash": config_hash(config), "agent_model": os.getenv("AGENT_MODEL", config["model"]),
-        "models": models(), "trials": trials, "scenarios": {},
+        "models": models(), "trials": trials, "harness": harness_fingerprint(), "scenarios": {},
     }
     for sc in scenarios:
         ts = sorted((g for sid, g in graded if sid == sc.id), key=lambda g: g["trial"])

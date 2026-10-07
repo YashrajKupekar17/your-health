@@ -23,6 +23,7 @@ class Scenario:
     writes: list[dict]  # expected changes to the clinic
     handoff: str
     critical: bool = False
+    refusal: str | None = None  # a rule the system must have enforced (tool error code), e.g. inside_change_cutoff
     no_leak: list[str] = field(default_factory=list)
     judge: list[str] = field(default_factory=list)
 
@@ -38,6 +39,7 @@ def _parse(raw: dict) -> Scenario:
         patient=raw["patient"],
         writes=expect.get("writes", []),
         handoff=expect.get("handoff", "none"),
+        refusal=expect.get("refusal"),
         no_leak=[str(x) for x in expect.get("no_leak", [])],
         judge=raw.get("judge", []),
     )

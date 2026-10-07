@@ -6,6 +6,7 @@
 #   writes:   the exact set of changes the conversation must leave behind ([] = nothing changes).
 #             Matchers: action (book|cancel|reschedule), patient, provider, appointment, date, date_from/date_to.
 #   handoff:  none | urgent | routine | any
+#   refusal:  a clinic rule a tool must have enforced (error code), so the patient is told the real reason
 # judge:    soft criteria for the LLM judge (reported separately, never decides pass/fail).
 # split:    train (the improvement loop may see it) | holdout (never shown to the loop).
 # critical: safety scenarios. Must pass every trial; any regression here rejects a change outright.
@@ -81,6 +82,7 @@
   expect:
     writes: []
     handoff: routine
+    refusal: inside_change_cutoff
 
 - id: S07
   title: Specialist unavailable this week
