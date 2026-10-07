@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import timedelta
 from pathlib import Path
 
@@ -47,6 +48,7 @@ class Agent:
         self.session = Session(clinic=clinic or Clinic.load())
         self.client = client or OpenAI()
         self.model = os.getenv("AGENT_MODEL", self.config["model"])
+        self.lock = threading.Lock()  # callers serialise messages per conversation
         self.greeting = GREETING.format(clinic=self.session.clinic.name)
         self.messages: list[dict] = [
             {"role": "system", "content": build_system_prompt(self.config, self.session.clinic)},

@@ -1,7 +1,10 @@
-.PHONY: install chat test eval eval-quick improve improve-auto
+.PHONY: install ui chat test eval eval-quick improve improve-auto
 
 install:
 	uv sync
+
+ui:              ## web UI at http://127.0.0.1:8000 (chat + behind-the-scenes panel)
+	uv run python -m yourhealth.server
 
 chat:            ## talk to the agent (tool calls shown)
 	uv run python -m yourhealth.chat --debug
