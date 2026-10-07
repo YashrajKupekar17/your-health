@@ -9,13 +9,15 @@ This project has three parts:
 
 The main idea: **important rules live in code; the AI model only handles the conversation.**
 
+**Demo video:** [a full conversation and the improvement loop closing (Loom)](https://www.loom.com/share/00daaab06de54819b0b0bcc23705d4a5)
+
 More detail: [design note](docs/DESIGN.md) · [diagrams and walkthrough](docs/ARCHITECTURE.md) ·
 [where AI helped](docs/AI_USAGE.md) · before/after results: [cycle 1](docs/evidence/cycle1/comparison.md),
-[cycle 2](docs/evidence/cycle2/)
+[cycle 2](docs/evidence/cycle2/), [the run in the video](docs/evidence/loom-demo/2_comparison.md)
 
 ---
 
-## Quick start
+## Setup
 
 You need Python 3.12+, [uv](https://docs.astral.sh/uv/) and an OpenAI API key.
 
@@ -24,19 +26,27 @@ cp .env.example .env     # put your OPENAI_API_KEY in this file
 make install
 ```
 
-**Run the agent** (web page with chat and a mic button):
+---
+
+## How to run
+
+### 1. The agent (web UI)
 
 ```bash
-make ui                  # open http://127.0.0.1:8000
+make ui                  # then open http://127.0.0.1:8000
 ```
 
-**Run the improvement loop:**
+- **Chat** by typing, or tap the **mic**, speak, and tap again: your speech is turned into text and
+  sent to the agent.
+- **Try a scenario** with the buttons under the chat (booking, "next Wednesday", an emergency, a prompt
+  injection, a relative asking for someone else's details).
+- **Watch the side panel**: who is verified, what is waiting for your "yes", which tools ran (refused
+  ones in red), and the patient's appointments.
+- **New conversation** starts a fresh chat. Bookings are kept until you restart `make ui`.
+- Prefer the terminal? `make chat` runs the same agent there.
 
-```bash
-make improve             # test -> find failures -> propose a fix -> test again -> ask you -> save
-```
-
-The clinic is pretend and its clock is frozen at **Monday 12 October 2026, 09:00**. Test patients:
+The clinic is pretend and its clock is frozen at **Monday 12 October 2026, 09:00**. Test patients
+(click one in the side panel to type their details):
 
 | Name | Date of birth |
 |---|---|
@@ -47,8 +57,55 @@ The clinic is pretend and its clock is frozen at **Monday 12 October 2026, 09:00
 | Aisha Khan | 2015-03-02 |
 | Tom Becker | 1979-09-09 |
 
-The web page has one-click examples (booking, an emergency, a prompt injection, a relative asking
-for someone else's details), and a side panel that shows what the code is doing behind the scenes.
+Example: *"Hi, I'm Priya Sharma, born 12 April 1990. Can I get a checkup with Dr Rao next week?"*
+
+### 2. The eval harness
+
+```bash
+make eval                                            # all 16 scenarios x 3 runs (a few minutes, ~$0.40)
+make eval-quick                                      # 1 run each, no AI judge (faster, cheaper)
+uv run python -m evals --scenario S13 S16 --trials 3 # only some scenarios
+make redflags                                        # emergency filter on 29 labelled messages (no API key)
+make test                                            # 95 automatic tests (no API key)
+```
+
+Each run prints a report and saves everything in `runs/eval/<run-id>/`:
+
+- `report.md`: one row per scenario, e.g. `3/3 [0.44–1.00]` (passes, and how sure we can be), the
+  check that failed if any, and the cost and speed of the agent;
+- `traces/`: every conversation with its tool calls, to read *why* something failed;
+- `results.json`: the same in machine-readable form (the improvement loop reads this).
+
+### 3. The improvement loop
+
+```bash
+make improve             # run -> flag failures -> propose a fix -> re-run -> show the score -> ask you
+```
+
+It prints four numbered steps:
+
+1. `[1/4] RUN`: the eval runs and lists the failures (e.g. `FAILED S13 ...: 0/3 passed (check: end_state)`),
+   then re-runs them to make sure they are real.
+2. `[2/4] IMPROVEMENT`: the proposed rule, and why.
+3. `[3/4] RE-RUN`: the rule is tried on a new version, first on the failing scenarios, then on all.
+4. `[4/4] SCORE`: the before -> after table. If it passed, you are asked `Apply this rule? [y/N]`.
+
+Say **y** and it is saved as a new version in `config/agent.yaml` (old versions in `config/history/`,
+every decision in `improve/ledger.jsonl`, the before/after table in `runs/improve/`). If nothing is
+failing, it says so and changes nothing.
+
+```bash
+make improve-auto                          # same, but says yes for you
+uv run python -m improve rollback 3        # go back to an older version
+uv run python -m improve ablate R5         # test without one rule; remove it if nothing gets worse
+```
+
+**Repeat the run from the video** (start from v3, before the "ask which date" rule existed):
+
+```bash
+uv run python -m improve rollback 3
+uv run python -m improve                   # flags S13, proposes the rule, re-runs, asks you
+```
 
 ---
 
@@ -94,10 +151,6 @@ Safety checks that are always on:
 
 ## How we test it
 
-```bash
-make eval                # all 16 scenarios, 3 runs each
-```
-
 - **16 scenarios**: normal bookings plus hard cases (an emergency in everyday words, cancelling too
   late, two patients with the same name, a wrong date of birth, a relative asking for details,
   "next Wednesday" when it could mean two dates, and more).
@@ -134,28 +187,15 @@ make eval                # all 16 scenarios, 3 runs each
 | v2 | The loop added "offer 3 times at a time". Test runs with too many options went from 6 of 42 to 1 of 42. |
 | v3 | We moved the "3 slots" limit into the code instead. Tested without the rule: nothing got worse, so the rule was removed. |
 | v4 | The loop found that the agent guessed which "next Wednesday" the patient meant. New rule: ask which date. Now the agent asks "14 or 21 October?" and books the right one. |
+| v5 | The same cycle run live in the video: rolled back to v3, the loop flagged S13 (2 of 6 runs passed), proposed "ask which date", and after the re-run S13 passed 3 of 3 with nothing else worse. |
 
 We are careful about what we claim: these fixes are measured on the scenarios they targeted. With
 16 scenarios and 3 runs each, we cannot claim a big overall improvement, and the design note says so.
 
-Other loop commands:
-
-```bash
-make improve-auto                          # same as make improve, but says yes for you (for demos)
-uv run python -m improve rollback 3        # go back to an older version
-uv run python -m improve ablate R4         # test without one rule; remove it if nothing gets worse
-```
-
----
-
 ## Other commands
 
 ```bash
-make chat                # the agent in the terminal
-make eval-quick          # quick test: 1 run each, no AI judge
-make redflags            # check the emergency filter on 29 example messages (no API key needed)
-make test                # 94 automatic tests (no API key needed)
-make lint                # code style checks
+make lint                # code style checks (CI runs lint + tests on every push)
 ```
 
 ## Settings
