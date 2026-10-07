@@ -21,7 +21,7 @@ Or with Docker, see below.
 ## Run the agent
 
 ```bash
-make ui                  # web UI at http://127.0.0.1:8000: chat + live session state + tool calls
+make ui                  # web UI at http://127.0.0.1:8000: chat (typed or spoken) + live session state + tool calls
 make chat                # same agent in the terminal
 ```
 
@@ -69,6 +69,7 @@ All runtime settings come from the environment (`src/yourhealth/settings.py`, va
 | `TURN_DEADLINE_S` | 60 | max time for one patient turn (all tool steps); then hand off |
 | `MAX_TURNS` | 40 | max patient messages per conversation; then hand off |
 | `MAX_SESSIONS` / `SESSION_IDLE_TTL_S` | 200 / 1800 | in-memory session store limits |
+| `TRANSCRIBE_MODEL` | gpt-4o-mini-transcribe | speech-to-text for the mic button (server-side; audio never stored or logged) |
 | `DEMO_MODE` | off (`make ui` sets 1) | expose tool calls, session state and demo patients in the UI |
 | `LOG_LEVEL` | INFO (server), WARNING (CLIs) | JSON logs: one event per turn and tool call, no patient text |
 
