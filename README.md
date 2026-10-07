@@ -37,7 +37,9 @@ make improve             # baseline -> propose a rule from failures -> gate -> a
 ```
 
 `make improve-auto` applies automatically when the gate passes (for demos).
-`uv run python -m improve rollback 1` restores an earlier config.
+`uv run python -m improve rollback 1` restores an earlier config; `uv run python -m improve ablate R4`
+re-tests whether a learned rule still earns its place and retires it if nothing regresses.
+Before/after evidence: `docs/evidence/cycle1/` and `docs/evidence/cycle2/`.
 
 Other commands:
 

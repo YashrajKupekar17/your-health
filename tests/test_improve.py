@@ -68,3 +68,9 @@ def test_lint_blocks_overfitting_and_bloat():
     assert lint("word " * 41, [])
     assert lint("Offer at most three times.", [{"rule": "offer at most three times"}])
     assert lint("Be brief.", [{"rule": f"r{i}"} for i in range(MAX_RULES)])
+
+
+def test_rule_ids_are_never_reused_after_retirement():
+    from improve.loop import rule_id_for
+
+    assert rule_id_for(4) == "R4" and rule_id_for(4) != rule_id_for(2)

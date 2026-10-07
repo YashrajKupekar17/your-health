@@ -183,7 +183,7 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
         candidate["version"] = version + 1
         candidate["learned_rules"] = list(config.get("learned_rules") or []) + [
             {
-                "id": f"R{len(config.get('learned_rules') or []) + 1}",
+                "id": rule_id_for(version + 1),
                 "rule": p.rule,
                 "why": p.why,
                 "fixes": p.fixes,
@@ -247,6 +247,11 @@ def run_cycle(yes: bool = False, baseline_dir: Path | None = None, max_attempts:
     return False
 
 
+def rule_id_for(new_version: int) -> str:
+    """Rule ids come from the config version that introduced them, so a retired id is never reused."""
+    return f"R{new_version}"
+
+
 def _approve(yes: bool, question: str) -> tuple[bool, str]:
     if yes:
         return True, "auto (--yes)"
@@ -278,7 +283,14 @@ def ablate(rule_id: str, yes: bool = False, trials: int = 3) -> bool:
     after, g = _confirm_drops(
         candidate, scenarios, after, before, [], trials, f"v{version + 1}-without-{rule_id}-confirm"
     )
-    print(comparison_table(before, after, []))
+    table = comparison_table(before, after, [])
+    print(table)
+    out = IMPROVE_RUNS / f"{datetime.now():%Y%m%d-%H%M%S}-ablate-{rule_id}"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "comparison.md").write_text(
+        f"# Ablation: v{version} without {rule_id}\n\n**Gate (non-regression):** "
+        f"{'passed' if g.accepted else 'FAILED: ' + '; '.join(g.reasons)}\n\n{table}\n"
+    )
     entry = {
         "config_version": version,
         "ablated": rule_id,
