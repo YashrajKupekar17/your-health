@@ -1,4 +1,4 @@
-.PHONY: install ui chat test lint eval eval-quick improve improve-auto
+.PHONY: install ui chat test lint redflags eval eval-quick improve improve-auto
 
 install:
 	uv sync
@@ -17,6 +17,9 @@ lint:            ## ruff lint + format check (what CI runs)
 
 eval:            ## full suite: all scenarios, 3 trials, with judge
 	uv run python -m evals --label full
+
+redflags:        ## emergency gate recall / over-escalation on a labelled set (no LLM)
+	uv run python -m evals.redflags
 
 eval-quick:      ## 1 trial, no judge
 	uv run python -m evals --trials 1 --no-judge --label quick

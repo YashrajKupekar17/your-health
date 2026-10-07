@@ -21,7 +21,8 @@ EMERGENCY_PATTERNS = [
     r"seizure|convulsing",
     r"overdose|took too many (pills|tablets)",
     r"throat (is )?(closing|swelling)|anaphyla",
-    r"suicid|kill myself|end my life|want to die|hurt myself|self[- ]harm",
+    r"suicid|kill myself|end(?:ing)? my life|end(?:ing)? it all|want to die|(?:don'?t|do not) want to (?:live|be alive)"
+    r"|hurt(?:ing)? myself|self[- ]harm",
 ]
 _EMERGENCY = re.compile("|".join(f"(?:{p})" for p in EMERGENCY_PATTERNS), re.IGNORECASE)
 
