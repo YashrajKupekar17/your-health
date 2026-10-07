@@ -16,6 +16,8 @@ cp .env.example .env     # add OPENAI_API_KEY
 make install
 ```
 
+Or with Docker, see below.
+
 ## Run the agent
 
 ```bash
@@ -42,7 +44,8 @@ Other commands:
 ```bash
 make eval                # full suite: 15 scenarios x 3 trials, deterministic checks + advisory judge
 make eval-quick          # 1 trial, no judge
-make test                # 45 deterministic tests, no API key needed
+make test                # deterministic tests, no API key needed (LLM calls are scripted)
+make lint                # ruff lint + format check (CI runs lint + tests on every push)
 uv run python -m evals --scenario S05 S13 --trials 3     # selected scenarios
 ```
 
@@ -50,11 +53,46 @@ Each eval run writes `runs/eval/<id>/` (config snapshot, `results.json`, `report
 conversation). Each improvement attempt is appended to `improve/ledger.jsonl`, accepted or not.
 Models can be overridden with `AGENT_MODEL`, `SIM_MODEL`, `JUDGE_MODEL`, `PROPOSER_MODEL`.
 
+## Configuration
+
+All runtime settings come from the environment (`src/yourhealth/settings.py`, validated at startup);
+`config/agent.yaml` is validated against a schema on every load and before the loop writes it.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | required | model provider |
+| `AGENT_MODEL` | from `agent.yaml` | override the agent model |
+| `LLM_TIMEOUT_S` / `LLM_MAX_RETRIES` | 20 / 2 | per-request timeout and retries |
+| `TURN_DEADLINE_S` | 60 | max time for one patient turn (all tool steps); then hand off |
+| `MAX_TURNS` | 40 | max patient messages per conversation; then hand off |
+| `MAX_SESSIONS` / `SESSION_IDLE_TTL_S` | 200 / 1800 | in-memory session store limits |
+| `DEMO_MODE` | off (`make ui` sets 1) | expose tool calls, session state and demo patients in the UI |
+| `LOG_LEVEL` | INFO (server), WARNING (CLIs) | JSON logs: one event per turn and tool call, no patient text |
+
+## Run in Docker
+
+```bash
+docker build -t yourhealth .
+docker run -p 8000:8000 --env-file .env yourhealth     # http://127.0.0.1:8000, /healthz for probes
+```
+
+## Production notes
+
+What is in place: per-request timeouts, a per-turn deadline and turn cap that end in a handoff;
+one shared schedule with atomic check-and-write (a test proves it double-books without the lock);
+structured PHI-free logs with tokens and latency; a session store with idle expiry behind an
+interface; internals hidden unless `DEMO_MODE`; config validation; CI; a non-root container with a
+health check. What a real deployment adds: Postgres with a unique constraint on (provider, start)
+instead of the in-memory clinic, sessions in Redis so several workers can serve one conversation,
+async endpoints, idempotency keys on messages, authentication and rate limits, OpenTelemetry traces,
+and a durable append-only audit log of every write.
+
 ## Layout
 
 ```
 src/yourhealth/   clinic.py (schedule rules) · tools.py (gated tools + session state)
                   safety.py (pre-LLM emergency gate) · agent.py (tool-calling loop) · chat.py · server.py
+                  settings.py (env + config schema) · sessions.py (session store) · logs.py (JSON logs)
 config/           agent.yaml (human-owned core prompt + loop-owned learned_rules) · history/ (every version)
 data/clinic.json  providers, patients, appointments
 evals/            scenarios.yaml · simulator.py · checks.py · judge.py · runner.py

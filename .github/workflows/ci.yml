@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Validate config and scenarios
+        run: uv run python -c "from yourhealth.agent import load_config; from evals.scenario import load_scenarios; load_config(); print(len(load_scenarios()), 'scenarios ok')"
+      - name: Test (no API key; LLM calls are scripted)
+        run: uv run pytest -q

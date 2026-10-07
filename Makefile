@@ -1,4 +1,4 @@
-.PHONY: install ui chat test eval eval-quick improve improve-auto
+.PHONY: install ui chat test lint eval eval-quick improve improve-auto
 
 install:
 	uv sync
@@ -11,6 +11,9 @@ chat:            ## talk to the agent (tool calls shown)
 
 test:            ## deterministic tests, no API key needed
 	uv run pytest -q
+
+lint:            ## ruff lint + format check (what CI runs)
+	uv run ruff check . && uv run ruff format --check .
 
 eval:            ## full suite: all scenarios, 3 trials, with judge
 	uv run python -m evals --label full
