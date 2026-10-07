@@ -78,7 +78,8 @@ docker run -p 8000:8000 --env-file .env yourhealth     # http://127.0.0.1:8000, 
 
 ## Production notes
 
-What is in place: per-request timeouts, a per-turn deadline and turn cap that end in a handoff;
+What is in place: a runtime output guard (no false "you're booked", no other patient's identifiers),
+progress events over SSE (`POST /api/session/{id}/message/stream`), per-request timeouts, a per-turn deadline and turn cap that end in a handoff;
 one shared schedule with atomic check-and-write (a test proves it double-books without the lock);
 structured PHI-free logs with tokens and latency; a session store with idle expiry behind an
 interface; internals hidden unless `DEMO_MODE`; config validation; CI; a non-root container with a
