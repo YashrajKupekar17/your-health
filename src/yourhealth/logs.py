@@ -11,7 +11,14 @@ import logging
 import sys
 from datetime import UTC, datetime
 
+from opentelemetry import trace
+
 LOGGER_NAME = "yourhealth"
+
+
+def current_trace_id() -> str | None:
+    ctx = trace.get_current_span().get_span_context()
+    return format(ctx.trace_id, "032x") if ctx.is_valid else None
 
 
 class JsonFormatter(logging.Formatter):
@@ -22,6 +29,9 @@ class JsonFormatter(logging.Formatter):
             "event": record.getMessage(),
             **getattr(record, "fields", {}),
         }
+        # Lets a log line be joined to its trace in Jaeger (absent when tracing is off).
+        if trace_id := current_trace_id():
+            entry["trace_id"] = trace_id
         return json.dumps(entry, default=str)
 
 

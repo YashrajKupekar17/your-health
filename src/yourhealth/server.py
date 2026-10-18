@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from .agent import Agent, load_config, make_client
 from .clinic import Clinic
 from .logs import configure_logging, get_logger, log_event
+from .observability import BUILD, instrument, setup_tracing, timed_llm_call
 from .sessions import InMemorySessionStore, SessionStore
 from .settings import Settings, get_settings, load_env
 
@@ -64,6 +65,9 @@ def create_app(
         return llm["client"]
 
     app = FastAPI(title="YourHealth scheduling agent")
+    instrument(app, active_sessions=lambda: len(store))
+    tracing = setup_tracing(app)
+    log_event(log, "startup", **BUILD, tracing=tracing, demo_mode=settings.demo_mode)
 
     @app.get("/")
     def index() -> FileResponse:
@@ -71,7 +75,25 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
+        """Liveness: the process can serve HTTP. Deliberately checks nothing external."""
         return {"ok": True, "sessions": len(store)}
+
+    @app.get("/readyz")
+    def readyz() -> dict:
+        """Readiness: this pod can start a conversation (agent config parses, clinic data loaded).
+
+        The LLM provider is not checked: an OpenAI outage would mark every pod unready at once and
+        turn a degraded service (agent hands off to staff) into a hard 503 for everyone.
+        """
+        try:
+            load_config(settings.config_path)
+        except Exception as e:  # noqa: BLE001 - any config problem means not ready
+            raise HTTPException(503, f"config not loadable: {type(e).__name__}") from None
+        return {"ready": True, "providers": len(clinic.list_providers())}
+
+    @app.get("/version")
+    def version() -> dict:
+        return BUILD
 
     @app.get("/api/info")
     def info() -> dict:
@@ -114,12 +136,13 @@ def create_app(
             raise HTTPException(413, "recording too long")
         started = time.perf_counter()
         try:
-            result = await run_in_threadpool(
-                get_client().audio.transcriptions.create,
-                model=settings.transcribe_model,
-                file=(f"speech.{audio_types[kind]}", audio, kind),
-                prompt=vocab,
-            )
+            with timed_llm_call("transcribe", settings.transcribe_model):
+                result = await run_in_threadpool(
+                    get_client().audio.transcriptions.create,
+                    model=settings.transcribe_model,
+                    file=(f"speech.{audio_types[kind]}", audio, kind),
+                    prompt=vocab,
+                )
         except Exception as e:  # noqa: BLE001 - report a clean error; the patient can type instead
             log_event(log, "transcribe_error", error_type=type(e).__name__)
             raise HTTPException(502, "could not transcribe that; please try again or type") from None
