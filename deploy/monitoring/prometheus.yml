@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+rule_files: [/etc/prometheus/alerts.yml]
+scrape_configs:
+  # scrape any pod with the prometheus.io/scrape annotation
+  - job_name: pods
+    kubernetes_sd_configs: [{ role: pod }]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version]
+        target_label: commit
