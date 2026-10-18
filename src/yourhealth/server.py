@@ -29,6 +29,7 @@ from .logs import configure_logging, get_logger, log_event
 from .metrics import setup_metrics
 from .sessions import InMemorySessionStore, SessionStore
 from .settings import Settings, get_settings, load_env
+from .tracing import setup_tracing
 
 STATIC = Path(__file__).resolve().parent / "static"
 log = get_logger("server")
@@ -67,6 +68,7 @@ def create_app(
 
     app = FastAPI(title="YourHealth scheduling agent")
     setup_metrics(app)
+    setup_tracing(app)
 
     @app.get("/")
     def index() -> FileResponse:

@@ -31,6 +31,7 @@ from .safety import EMERGENCY_REPLY, emergency_match
 from .settings import Settings, get_settings, validate_config
 from .streaming import SentenceStreamer, read_stream
 from .tools import TOOL_SCHEMAS, Session, dispatch
+from .tracing import tracer
 
 FALLBACK_REPLY = "Sorry, I'm having trouble with that. Let me connect you with our front desk."
 ENDED_REPLY = "A member of our staff will take it from here."
@@ -221,20 +222,21 @@ class Agent:
             tools=TOOL_SCHEMAS,
             parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
         )
-        try:
-            if streamer is None:
-                response = self.client.chat.completions.create(**request)
-                self._count_usage(response)
-                message = response.choices[0].message
-            else:
-                self._usage["llm_calls"] += 1
-                chunks = self.client.chat.completions.create(
-                    **request, stream=True, stream_options={"include_usage": True}
-                )
-                message = read_stream(chunks, streamer, self._add_usage)
-        except Exception as e:
-            LLM_CALLS.labels(type(e).__name__).inc()
-            raise
+        with tracer.start_as_current_span("llm.chat", attributes={"llm.model": self.model}):
+            try:
+                if streamer is None:
+                    response = self.client.chat.completions.create(**request)
+                    self._count_usage(response)
+                    message = response.choices[0].message
+                else:
+                    self._usage["llm_calls"] += 1
+                    chunks = self.client.chat.completions.create(
+                        **request, stream=True, stream_options={"include_usage": True}
+                    )
+                    message = read_stream(chunks, streamer, self._add_usage)
+            except Exception as e:
+                LLM_CALLS.labels(type(e).__name__).inc()
+                raise
         LLM_CALLS.labels("ok").inc()
         return message
 
