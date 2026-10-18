@@ -2,7 +2,11 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -20,3 +24,43 @@ jobs:
         run: uv run python -c "from yourhealth.agent import load_config; from evals.scenario import load_scenarios; load_config(); print(len(load_scenarios()), 'scenarios ok')"
       - name: Test (no API key; LLM calls are scripted)
         run: uv run pytest -q
+      - name: Lint helm chart
+        run: |
+          helm lint deploy/helm/yourhealth -f deploy/helm/yourhealth/values-prod.yaml --set image.tag=test
+          helm lint deploy/helm/yourhealth -f deploy/helm/yourhealth/values-dev.yaml --set image.tag=test
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # on PRs github.sha is a temporary merge commit, use the real head commit instead
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      IMAGE: ghcr.io/yashrajkupekar17/your-health
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - name: Build
+        run: docker build --build-arg GIT_SHA=$SHA -t $IMAGE:$SHA .
+      - name: Scan image
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ env.SHA }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan repo for secrets and k8s misconfig
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: fs
+          scanners: secret,misconfig
+          trivy-config: trivy.yaml
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Push to ghcr
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push $IMAGE:$SHA
