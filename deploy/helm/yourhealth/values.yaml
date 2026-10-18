@@ -1,0 +1,26 @@
+image:
+  repository: ghcr.io/yashrajkupekar17/your-health
+  tag: ""          # git sha, set at deploy time
+  pullPolicy: IfNotPresent
+
+# Sessions and bookings are kept in memory, so 2 replicas = 2 separate clinics.
+# Needs Redis/Postgres before this can go above 1.
+replicaCount: 1
+
+env:
+  DEMO_MODE: "0"
+  LOG_LEVEL: INFO
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger.observability:4318
+
+# created by hand: kubectl -n yourhealth create secret generic yourhealth-llm --from-env-file=.env
+secretName: yourhealth-llm
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 384Mi
+
+ingress:
+  host: yourhealth.local
