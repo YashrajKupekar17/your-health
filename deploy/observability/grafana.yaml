@@ -34,12 +34,16 @@ spec:
           ports: [{ name: http, containerPort: 3000 }]
           readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 10 }
           resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 384Mi } }
-          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           volumeMounts:
+            - { name: data, mountPath: /var/lib/grafana }   # sqlite + plugins; disposable, dashboards are provisioned
+            - { name: tmp, mountPath: /tmp }
             - { name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml }
             - { name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml }
             - { name: dashboards, mountPath: /var/lib/grafana/dashboards }
       volumes:
+        - { name: data, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
         - { name: provisioning, configMap: { name: grafana-provisioning } }
         - { name: dashboards, configMap: { name: grafana-dashboards } }
 ---

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-minikube status >/dev/null 2>&1 || minikube start --driver=docker --cpus=3 --memory=4000 --cni=calico
+minikube status --format "{{.Host}}" 2>/dev/null | grep -q Running || minikube start --driver=docker --cpus=3 --memory=4000 --cni=calico
 minikube addons enable ingress
 minikube addons enable metrics-server
 

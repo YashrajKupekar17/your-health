@@ -20,7 +20,9 @@ spec:
             - { name: otlp-http, containerPort: 4318 }
           readinessProbe: { httpGet: { path: /, port: 14269 }, periodSeconds: 10 }
           resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 384Mi } }
-          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
 ---
 apiVersion: v1
 kind: Service
