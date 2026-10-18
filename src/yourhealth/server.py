@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from .agent import Agent, load_config, make_client
 from .clinic import Clinic
 from .logs import configure_logging, get_logger, log_event
+from .metrics import setup_metrics
 from .sessions import InMemorySessionStore, SessionStore
 from .settings import Settings, get_settings, load_env
 
@@ -65,6 +66,7 @@ def create_app(
         return llm["client"]
 
     app = FastAPI(title="YourHealth scheduling agent")
+    setup_metrics(app)
 
     @app.get("/")
     def index() -> FileResponse:

@@ -228,3 +228,13 @@ def test_readyz_fails_on_bad_config(tmp_path):
     c = client_for(False, config_path=bad)
     assert c.get("/readyz").status_code == 503
     assert c.get("/healthz").status_code == 200
+
+
+def test_metrics_use_route_template():
+    c = client_for(True)
+    sid = start(c)
+    c.post(f"/api/session/{sid}/message", json={"text": "I have crushing chest pain"})
+    body = c.get("/metrics").text
+    assert 'route="/api/session/{session_id}/message"' in body
+    assert sid not in body
+    assert 'yourhealth_turns_total{outcome="emergency_gate"}' in body

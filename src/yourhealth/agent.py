@@ -26,6 +26,7 @@ from openai import OpenAI
 from .clinic import Clinic
 from .guard import check_reply
 from .logs import get_logger, log_event
+from .metrics import LLM_CALLS, TURNS
 from .safety import EMERGENCY_REPLY, emergency_match
 from .settings import Settings, get_settings, validate_config
 from .streaming import SentenceStreamer, read_stream
@@ -115,6 +116,7 @@ class Agent:
         self._usage = {"llm_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
         self._error_type: str | None = None
         reply, outcome = self._run_turn(patient_text)
+        TURNS.labels(outcome).inc()
         log_event(
             log,
             "turn",
@@ -219,13 +221,22 @@ class Agent:
             tools=TOOL_SCHEMAS,
             parallel_tool_calls=False,  # one action at a time keeps propose/confirm ordering simple
         )
-        if streamer is None:
-            response = self.client.chat.completions.create(**request)
-            self._count_usage(response)
-            return response.choices[0].message
-        self._usage["llm_calls"] += 1
-        chunks = self.client.chat.completions.create(**request, stream=True, stream_options={"include_usage": True})
-        return read_stream(chunks, streamer, self._add_usage)
+        try:
+            if streamer is None:
+                response = self.client.chat.completions.create(**request)
+                self._count_usage(response)
+                message = response.choices[0].message
+            else:
+                self._usage["llm_calls"] += 1
+                chunks = self.client.chat.completions.create(
+                    **request, stream=True, stream_options={"include_usage": True}
+                )
+                message = read_stream(chunks, streamer, self._add_usage)
+        except Exception as e:
+            LLM_CALLS.labels(type(e).__name__).inc()
+            raise
+        LLM_CALLS.labels("ok").inc()
+        return message
 
     def _emit(self, sentence: str) -> None:
         try:
