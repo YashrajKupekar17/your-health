@@ -1,5 +1,7 @@
 # YourHealth: a scheduling agent that gets better from its own mistakes
 
+> Kubernetes / CI/CD / monitoring setup and how to run it: [docs/DEVOPS.md](docs/DEVOPS.md)
+
 This project has three parts:
 
 1. **An agent** that talks to patients (by text or voice) and books, moves or cancels clinic appointments.
