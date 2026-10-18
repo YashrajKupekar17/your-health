@@ -12,6 +12,7 @@ patient list never leave the server.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -72,6 +73,20 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "sessions": len(store)}
+
+    # Readiness only checks things a restart/reroute can fix. The LLM is left out on purpose:
+    # if OpenAI is down every pod would go unready and users would get 503s instead of a handoff.
+    @app.get("/readyz")
+    def readyz() -> dict:
+        try:
+            load_config(settings.config_path)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(503, "config not loadable") from None
+        return {"ready": True}
+
+    @app.get("/version")
+    def version() -> dict:
+        return {"commit": os.getenv("GIT_SHA", "unknown")}
 
     @app.get("/api/info")
     def info() -> dict:

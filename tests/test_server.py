@@ -214,3 +214,17 @@ def test_transcribe_provider_failure_is_a_clean_error():
     c, _ = voice_client(fail=True)
     r = c.post("/api/transcribe", content=b"audio", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 502 and "type" in r.json()["detail"]
+
+
+def test_readyz_and_version():
+    c = client_for(False)
+    assert c.get("/readyz").json() == {"ready": True}
+    assert "commit" in c.get("/version").json()
+
+
+def test_readyz_fails_on_bad_config(tmp_path):
+    bad = tmp_path / "agent.yaml"
+    bad.write_text("version: 0\n")
+    c = client_for(False, config_path=bad)
+    assert c.get("/readyz").status_code == 503
+    assert c.get("/healthz").status_code == 200
