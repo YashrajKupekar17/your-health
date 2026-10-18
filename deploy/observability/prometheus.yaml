@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: prometheus }
+---
+# Read-only discovery of pods; nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: prometheus-discovery }
+rules:
+  - apiGroups: [""]
+    resources: [pods, endpoints, services]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: prometheus-discovery }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: prometheus-discovery }
+subjects: [{ kind: ServiceAccount, name: prometheus, namespace: observability }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: prometheus, labels: { app: prometheus } }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one TSDB volume; two writers would corrupt it
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata: { labels: { app: prometheus } }
+    spec:
+      serviceAccountName: prometheus
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=3d
+            - --web.enable-lifecycle
+          ports: [{ name: http, containerPort: 9090 }]
+          readinessProbe: { httpGet: { path: /-/ready, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /-/healthy, port: http }, periodSeconds: 20 }
+          resources: { requests: { cpu: 50m, memory: 200Mi }, limits: { memory: 512Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - { name: config, configMap: { name: prometheus-config } }
+        - { name: data, persistentVolumeClaim: { claimName: prometheus-data } }
+---
+# Metrics survive a Prometheus restart (so you can show the window before and after a fault).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: prometheus-data }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: prometheus }
+spec:
+  selector: { app: prometheus }
+  ports: [{ name: http, port: 9090, targetPort: http }]

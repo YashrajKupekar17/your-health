@@ -1,0 +1,46 @@
+# SLOs (see docs/DEVOPS.md "Reliability targets"):
+#   Availability: 99% of API requests do not fail with 5xx.
+#   Conversation success: 99% of patient turns end without a system failure
+#     (llm_error / deadline / step_limit). A 200 that says "let me get the front desk" because the
+#     LLM timed out is a failure for the patient, so HTTP status alone is not enough.
+#   Latency: 95% of chat turns complete within 10s (they make 1-4 LLM calls).
+groups:
+  - name: yourhealth-sli
+    rules:
+      - record: yourhealth:api_requests:rate5m
+        expr: sum(rate(yourhealth_http_requests_total{route=~"/api/.*"}[5m]))
+      - record: yourhealth:api_errors:ratio_rate5m
+        expr: |
+          sum(rate(yourhealth_http_requests_total{route=~"/api/.*",status=~"5.."}[5m]))
+          / clamp_min(yourhealth:api_requests:rate5m, 1e-9)
+      - record: yourhealth:turn_failures:ratio_rate5m
+        expr: |
+          sum(rate(yourhealth_turns_total{outcome=~"llm_error|deadline|step_limit"}[5m]))
+          / clamp_min(sum(rate(yourhealth_turns_total[5m])), 1e-9)
+      - record: yourhealth:turn_latency:p95_5m
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(
+            yourhealth_http_request_duration_seconds_bucket{route=~"/api/session/\\{session_id\\}/message.*"}[5m])))
+  - name: yourhealth-alerts
+    rules:
+      - alert: YourHealthDown
+        expr: absent(up{namespace="yourhealth"} == 1)
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "No healthy yourhealth pod is being scraped" }
+      - alert: YourHealthApiErrorBudgetBurn
+        # 14.4x burn of a 1% budget = whole 30-day budget gone in ~2 days.
+        expr: yourhealth:api_errors:ratio_rate5m > (14.4 * 0.01)
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "API 5xx ratio is burning the 99% availability budget fast" }
+      - alert: YourHealthConversationFailures
+        expr: yourhealth:turn_failures:ratio_rate5m > (14.4 * 0.01)
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "Patient turns failing (LLM errors/deadlines) - check llm_calls_total by result" }
+      - alert: YourHealthSlowTurns
+        expr: yourhealth:turn_latency:p95_5m > 10
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "p95 chat turn latency above the 10s target" }
