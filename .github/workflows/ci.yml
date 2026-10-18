@@ -1,11 +1,29 @@
 name: ci
 
+# Source change -> checks -> image (tagged with the commit SHA) -> scan -> push -> deploy to a
+# throwaway Kubernetes cluster and smoke-test it. Promotion to the laptop "prod" cluster is a manual
+# step (scripts/deploy.sh <sha>) because GitHub's runners cannot reach it; that script refuses SHAs
+# whose run here did not pass.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # On pull_request, github.sha is a synthetic merge commit; tag with the commit the author pushed.
+  SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  IMAGE: ghcr.io/yashrajkupekar17/your-health
 
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +38,127 @@ jobs:
         run: uv run python -c "from yourhealth.agent import load_config; from evals.scenario import load_scenarios; load_config(); print(len(load_scenarios()), 'scenarios ok')"
       - name: Test (no API key; LLM calls are scripted)
         run: uv run pytest -q
+      - uses: azure/setup-helm@v4
+      - name: Helm lint + render every environment
+        run: |
+          for env in dev prod ci; do
+            helm lint deploy/helm/yourhealth -f deploy/helm/yourhealth/values-$env.yaml --set image.tag=$SHA
+            helm template yourhealth deploy/helm/yourhealth -f deploy/helm/yourhealth/values-$env.yaml --set image.tag=$SHA > /dev/null
+          done
+      - name: Render observability stack
+        run: kubectl kustomize deploy/observability > /dev/null
+
+  security-scan:
+    # Repo-level: leaked secrets, vulnerable locked dependencies, Dockerfile/Helm misconfiguration.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan (secrets, deps, IaC)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: secret,vuln,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  build:
+    needs: [checks, security-scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write      # push to GHCR with the workflow's short-lived token, no stored PAT
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (tag = commit SHA)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: yourhealth:${{ env.SHA }}
+          build-args: |
+            GIT_SHA=${{ env.SHA }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy image scan (gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: yourhealth:${{ env.SHA }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+      - name: Save image for the e2e job
+        run: docker save yourhealth:$SHA -o /tmp/image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: /tmp/image.tar
+          retention-days: 1
+      - name: Push to GHCR
+        id: push
+        # Fork PRs get a read-only token: build and scan them, but don't push.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag yourhealth:$SHA $IMAGE:$SHA
+          docker push $IMAGE:$SHA
+          echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE:$SHA)" >> "$GITHUB_OUTPUT"
+      - name: Summary
+        run: |
+          echo "### Image" >> $GITHUB_STEP_SUMMARY
+          echo "- commit: \`$SHA\`" >> $GITHUB_STEP_SUMMARY
+          echo "- image: \`$IMAGE:$SHA\`" >> $GITHUB_STEP_SUMMARY
+          echo "- digest: \`${{ steps.push.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy-e2e:
+    # The same chart and image, deployed to an ephemeral kind cluster: proves the release works on
+    # Kubernetes (probes pass, Service routes, the app reports this exact commit) before any human
+    # promotes it.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: ci
+      - name: Load image into kind
+        run: |
+          docker load -i /tmp/image.tar
+          kind load docker-image yourhealth:$SHA --name ci
+      - name: Deploy with Helm (atomic = auto-rollback if not healthy)
+        run: |
+          kubectl create namespace yourhealth
+          # Dummy key: the smoke test never reaches the LLM. Real keys never enter CI.
+          kubectl -n yourhealth create secret generic yourhealth-llm --from-literal=OPENAI_API_KEY=ci-dummy
+          helm upgrade --install yourhealth deploy/helm/yourhealth -n yourhealth \
+            -f deploy/helm/yourhealth/values-ci.yaml --set image.tag=$SHA \
+            --atomic --wait --timeout 3m
+      - name: helm test (in-cluster smoke)
+        run: helm test yourhealth -n yourhealth --logs
+      - name: Smoke test through the Service
+        run: |
+          kubectl -n yourhealth port-forward svc/yourhealth 8080:80 &
+          sleep 3
+          curl -fsS localhost:8080/readyz
+          curl -fsS localhost:8080/version | tee /tmp/version.json
+          grep -q "\"$SHA\"" /tmp/version.json
+          curl -fsS -X POST localhost:8080/api/session | grep -q session_id
+          curl -fsS localhost:8080/metrics | grep -q yourhealth_build_info
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n yourhealth get all,events
+          kubectl -n yourhealth describe pods
+          kubectl -n yourhealth logs -l app.kubernetes.io/name=yourhealth --tail=100
