@@ -4,6 +4,13 @@
 runs
 research_notes
 reports
+notes
 __pycache__
 .pytest_cache
 .ruff_cache
+*.png
+deploy
+docs
+evals
+improve
+tests
