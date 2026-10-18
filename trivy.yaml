@@ -1,0 +1,4 @@
+# lets trivy render the helm chart (image.tag is required)
+helm:
+  set:
+    - image.tag=scan

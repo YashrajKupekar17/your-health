@@ -1,0 +1,9 @@
+image:
+  repository: yourhealth   # built locally and loaded with `minikube image load`
+  pullPolicy: Never
+env:
+  DEMO_MODE: "1"
+  LOG_LEVEL: DEBUG
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger.observability:4318
+ingress:
+  host: yourhealth-dev.local

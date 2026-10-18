@@ -1,0 +1,27 @@
+groups:
+  - name: yourhealth
+    rules:
+      - alert: YourHealthDown
+        expr: absent(up{namespace="yourhealth"} == 1)
+        for: 2m
+        annotations:
+          summary: app is not being scraped / not up
+
+      # SLO: 99% of API requests don't return 5xx
+      - alert: YourHealthHigh5xx
+        expr: |
+          sum(rate(yourhealth_http_requests_total{route=~"/api/.*",status=~"5.."}[5m]))
+            / sum(rate(yourhealth_http_requests_total{route=~"/api/.*"}[5m])) > 0.01
+        for: 5m
+        annotations:
+          summary: more than 1% of API requests failing
+
+      # SLO: 99% of patient turns don't fail on our side. When the LLM fails the agent still
+      # answers with HTTP 200 ("let me get the front desk"), so the 5xx alert can't see it.
+      - alert: YourHealthConversationFailures
+        expr: |
+          sum(rate(yourhealth_turns_total{outcome=~"llm_error|deadline|step_limit"}[5m]))
+            / sum(rate(yourhealth_turns_total[5m])) > 0.01
+        for: 5m
+        annotations:
+          summary: more than 1% of conversations failing (check yourhealth_llm_calls_total by result)

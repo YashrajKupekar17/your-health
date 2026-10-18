@@ -1,0 +1,5 @@
+# image comes from ghcr, built and scanned by CI (see values.yaml defaults)
+env:
+  DEMO_MODE: "0"
+  LOG_LEVEL: INFO
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger.observability:4318
