@@ -62,6 +62,17 @@ and Prometheus/Grafana show it. To go back: `helm rollback yourhealth <revision>
 canary or blue-green because both need two versions running at once, which the in-memory state
 doesn't allow.
 
+**Drift.** Two kinds I care about. One is the cluster not matching the chart, e.g. someone
+does `kubectl scale` or `kubectl set env` by hand. Check with
+`helm get manifest yourhealth -n yourhealth | kubectl diff -n yourhealth -f -`. Something I found
+while testing this: a normal `helm upgrade` with the same values does not undo a manual change,
+because helm only patches what changed between its own releases. And `kubectl diff` doesn't show
+env vars that were added by hand at all, only changes to fields the chart sets. To really reset
+it I had to run the upgrade with `--server-side=false --force-replace`. The other kind is running
+something that isn't in git. Every image tag is a commit sha and `/version` returns it, so I
+compare that with the last green commit on the PR/main. Since all config lives in the values
+files, the fix for both is the same: redeploy from git.
+
 **Monitoring.** Plain Prometheus + Grafana + Jaeger manifests instead of kube-prometheus-stack,
 which needs ~2GB and my laptop doesn't have that to spare.
 - Metrics: requests by route and status, latency, LLM calls by result (ok / error type), turn

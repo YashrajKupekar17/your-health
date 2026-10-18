@@ -5,6 +5,9 @@ Everything below is from my local minikube cluster on 18 Oct 2026.
 Tested version: `5265c0c601cde21ec4cda8dc2559e377d7944f2e`
 (`ghcr.io/yashrajkupekar17/your-health:5265c0c601cde21ec4cda8dc2559e377d7944f2e`)
 
+The commits after `5265c0c` in the PR only touch docs (`docs/`, `BASELINE.md`, `README.md`), so the
+image and chart that were tested are the same as in the final commit.
+
 ## CI run for that commit
 
 https://github.com/YashrajKupekar17/your-health/actions/runs/39132051079
@@ -96,3 +99,20 @@ sum by (result) (yourhealth_llm_calls_total)   {result="ok"} 12
 19:18:31  alerts: []
 ```
 The alert cleared about 5 minutes after the rollback, once the failures had left the 5m window.
+
+## Drift check
+
+Changed the live deployment by hand, then compared it with what helm deployed:
+```
+$ kubectl -n yourhealth scale deploy/yourhealth --replicas=2
+$ kubectl -n yourhealth set env deploy/yourhealth LOG_LEVEL=DEBUG
+$ helm get manifest yourhealth -n yourhealth | kubectl diff -n yourhealth -f -
+-  replicas: 2
++  replicas: 1
+```
+The replica change shows up, the added env var doesn't. A plain `helm upgrade` with the same
+values left both in place. `--server-side=true --force-conflicts` fixed replicas but kept the env
+var. `--server-side=false --force-replace` (revision 11) reset both:
+```
+replicas=1 env=OPENAI_API_KEY
+```
