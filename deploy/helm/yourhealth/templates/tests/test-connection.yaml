@@ -1,0 +1,22 @@
+# `helm test` hook: proves the Service routes to a Ready pod that reports the expected build.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "yourhealth.fullname" . }}-test
+  labels:   # not the app's selector labels, or the Service would route users to this pod
+    app.kubernetes.io/component: helm-test
+    app.kubernetes.io/part-of: {{ include "yourhealth.fullname" . }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: curl
+      image: curlimages/curl:8.10.1
+      securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+      command: [sh, -c]
+      args:
+        - curl -fsS http://{{ include "yourhealth.fullname" . }}/version | grep -q '"{{ .Values.image.tag }}"'
+          && curl -fsS -X POST http://{{ include "yourhealth.fullname" . }}/api/session | grep -q session_id

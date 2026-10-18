@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "yourhealth.fullname" . }}
+  labels: {{- include "yourhealth.labels" . | nindent 4 }}
+data:
+  HOST: "0.0.0.0"
+  PORT: "8000"
+  {{- range $k, $v := .Values.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+  {{- if .Values.tracing.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.tracing.endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ include "yourhealth.fullname" . | quote }}
+  {{- end }}

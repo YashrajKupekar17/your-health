@@ -1,0 +1,11 @@
+{{- if .Values.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "yourhealth.fullname" . }}
+  labels: {{- include "yourhealth.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "yourhealth.selectorLabels" . | nindent 6 }}
+{{- end }}

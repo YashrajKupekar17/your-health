@@ -1,0 +1,67 @@
+{{- if not .Values.image.tag }}{{ fail "image.tag is required (the git SHA of the build)" }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "yourhealth.fullname" . }}
+  labels: {{- include "yourhealth.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/change-cause: "deploy {{ .Values.image.tag }} (helm rev {{ .Release.Revision }})"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  strategy: {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels: {{- include "yourhealth.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "yourhealth.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.monitoring.scrape }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "yourhealth.fullname" . }}
+      automountServiceAccountToken: false   # the app never talks to the Kubernetes API
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 70     # let an in-flight turn (TURN_DEADLINE_S=60) finish
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8000 }
+          envFrom:
+            - configMapRef: { name: {{ include "yourhealth.fullname" . }} }
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.existingSecret }}
+                  key: {{ .Values.secret.key }}
+            - { name: POD_NAME, valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.probes }}
+          startupProbe:
+            httpGet: { path: {{ .startup.path }}, port: http }
+            periodSeconds: {{ .startup.periodSeconds }}
+            failureThreshold: {{ .startup.failureThreshold }}
+          livenessProbe:
+            httpGet: { path: {{ .liveness.path }}, port: http }
+            periodSeconds: {{ .liveness.periodSeconds }}
+            failureThreshold: {{ .liveness.failureThreshold }}
+            timeoutSeconds: {{ .liveness.timeoutSeconds }}
+          readinessProbe:
+            httpGet: { path: {{ .readiness.path }}, port: http }
+            periodSeconds: {{ .readiness.periodSeconds }}
+            failureThreshold: {{ .readiness.failureThreshold }}
+            timeoutSeconds: {{ .readiness.timeoutSeconds }}
+          {{- end }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }   # read-only root fs; Python/uvicorn may need scratch space
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }

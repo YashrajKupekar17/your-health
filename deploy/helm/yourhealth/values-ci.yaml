@@ -1,0 +1,10 @@
+# Ephemeral kind cluster in GitHub Actions: no ingress controller, no observability stack.
+image:
+  repository: yourhealth
+  pullPolicy: Never
+ingress:
+  enabled: false
+networkPolicy:
+  enabled: false
+tracing:
+  enabled: false

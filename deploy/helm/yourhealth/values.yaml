@@ -1,0 +1,93 @@
+# Defaults = the "prod-like" baseline. Environment files (values-dev.yaml, values-prod.yaml)
+# override only what differs, so there is one chart and no copied manifests to drift apart.
+
+image:
+  repository: ghcr.io/yashrajkupekar17/your-health
+  tag: ""                # set per release to the git SHA (CI / scripts/deploy.sh); never "latest"
+  pullPolicy: IfNotPresent
+
+# One replica on purpose: conversations and bookings live in process memory (InMemorySessionStore,
+# shared Clinic). Two replicas would mean two separate clinics and lost sessions. Scaling out needs
+# an external store (Redis/Postgres) first - see docs/DEVOPS.md.
+replicaCount: 1
+
+strategy:
+  # Surge a new pod and only drop the old one once the new one is Ready: no gap in service.
+  # Sessions on the old pod end with it (they are in memory); affinity keeps clients on one pod
+  # while both run.
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+env:
+  LOG_LEVEL: INFO
+  DEMO_MODE: "0"         # 0 = API returns only the reply (no tool internals / patient list)
+  LLM_TIMEOUT_S: "20"
+  TURN_DEADLINE_S: "60"
+  MAX_SESSIONS: "200"
+  SESSION_IDLE_TTL_S: "1800"
+
+# The OpenAI key is never in values or git. Create it out of band:
+#   kubectl -n yourhealth create secret generic yourhealth-llm --from-env-file=.env
+secret:
+  existingSecret: yourhealth-llm
+  key: OPENAI_API_KEY
+
+resources:
+  # Measured idle ~90Mi; a turn is I/O-bound (waiting on the LLM), so CPU stays low.
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 384Mi        # memory limit only: a CPU limit would throttle SSE streaming for no gain
+
+probes:
+  startup:   { path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  liveness:  { path: /healthz, periodSeconds: 10, failureThreshold: 3, timeoutSeconds: 2 }
+  readiness: { path: /readyz,  periodSeconds: 5,  failureThreshold: 2, timeoutSeconds: 2 }
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: yourhealth.local
+  # ingress-nginx talks to pod IPs directly (Service sessionAffinity is bypassed), so stickiness
+  # during a rollout has to be a cookie at the ingress.
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: yh-route
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "90"   # > TURN_DEADLINE_S so SSE isn't cut
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"     # stream SSE sentences as they come
+    nginx.ingress.kubernetes.io/proxy-body-size: 8m        # matches MAX_AUDIO_BYTES
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
+  monitoringNamespace: observability
+
+tracing:
+  enabled: true
+  endpoint: http://jaeger.observability.svc:4318
+
+monitoring:
+  # Prometheus scrapes by pod annotation (no Prometheus Operator CRDs needed).
+  scrape: true
+
+pdb:
+  enabled: false          # with 1 replica a PDB would block node drains; enable with replicas >= 2
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }

@@ -1,0 +1,3 @@
+Deployed {{ .Values.image.repository }}:{{ .Values.image.tag }} as revision {{ .Release.Revision }}.
+Check the running build:  curl -s http://{{ .Values.ingress.host }}/version
+Roll back:                helm rollback {{ .Release.Name }} -n {{ .Release.Namespace }}

@@ -1,0 +1,7 @@
+# "Prod" on the local cluster: only images CI built, scanned and pushed (ghcr.io, tagged by SHA).
+image:
+  repository: ghcr.io/yashrajkupekar17/your-health
+  pullPolicy: IfNotPresent
+env:
+  DEMO_MODE: "0"
+  LOG_LEVEL: INFO

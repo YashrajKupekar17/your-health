@@ -1,0 +1,9 @@
+# Local development on minikube: image built locally, demo panel on, verbose logs.
+image:
+  repository: yourhealth
+  pullPolicy: Never      # image is loaded into minikube by scripts/deploy.sh --local
+env:
+  DEMO_MODE: "1"
+  LOG_LEVEL: DEBUG
+ingress:
+  host: yourhealth.dev.local
