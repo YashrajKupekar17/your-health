@@ -1,5 +1,7 @@
 # YourHealth: a scheduling agent that gets better from its own mistakes
 
+> **Running on Kubernetes:** Helm chart, CI/CD, observability and security are described in [docs/DEVOPS.md](docs/DEVOPS.md) (evidence: [docs/EVIDENCE.md](docs/EVIDENCE.md), baseline: [BASELINE.md](BASELINE.md)).
+
 This project has three parts:
 
 1. **An agent** that talks to patients (by text or voice) and books, moves or cancels clinic appointments.

@@ -23,8 +23,8 @@ else
   [ ${#SHA} -eq 40 ] || { echo "use the full 40-char SHA" >&2; exit 1; }
   result=$(gh run list --workflow ci --commit "$SHA" --json conclusion,status -q '.[0] | "\(.status)/\(.conclusion)"')
   [ "$result" = "completed/success" ] || { echo "CI for $SHA is '$result', not completed/success: refusing" >&2; exit 1; }
-  IMAGE=ghcr.io/yashrajkupekar17/your-health:$SHA
-  minikube image ls | grep -q "$SHA" || { docker pull "$IMAGE" && minikube image load "$IMAGE"; }
+  # The cluster pulls ghcr.io/yashrajkupekar17/your-health:$SHA itself (public package): exactly the
+  # image CI scanned and tested, never rebuilt locally.
   VALUES=$CHART/values-prod.yaml
 fi
 

@@ -5,8 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 minikube status --format "{{.Host}}" 2>/dev/null | grep -q Running || minikube start --driver=docker --cpus=3 --memory=4000 --cni=calico
-minikube addons enable ingress
-minikube addons enable metrics-server
+# The addon command gives up waiting on slow image pulls; the controller keeps starting anyway.
+minikube addons enable ingress || echo "ingress still starting, continuing"
+minikube addons enable metrics-server || true
 
 kubectl apply -f deploy/observability/namespace.yaml
 kubectl create namespace yourhealth --dry-run=client -o yaml | kubectl apply -f -

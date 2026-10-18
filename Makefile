@@ -1,4 +1,4 @@
-.PHONY: install ui chat test lint redflags eval eval-quick improve improve-auto
+.PHONY: install ui chat test lint redflags eval eval-quick improve improve-auto cluster-up deploy-local deploy smoke rollback
 
 install:
 	uv sync
@@ -29,3 +29,19 @@ improve:         ## one improvement cycle: propose -> gate -> ask -> apply
 
 improve-auto:    ## same, apply automatically if the gate passes (for demos)
 	uv run python -m improve --yes
+
+# ---- Kubernetes (see docs/DEVOPS.md) ----
+cluster-up:      ## minikube + ingress + observability stack + secrets from .env
+	scripts/cluster-up.sh
+
+deploy-local:    ## build current HEAD and deploy it with dev values
+	scripts/deploy.sh --local
+
+deploy:          ## promote a CI-built image: make deploy SHA=<full sha>
+	scripts/deploy.sh $(SHA)
+
+smoke:           ## user journey through the ingress
+	scripts/smoke.sh
+
+rollback:        ## roll back to the previous Helm revision
+	helm rollback yourhealth -n yourhealth --wait

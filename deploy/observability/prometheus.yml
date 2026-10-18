@@ -16,4 +16,4 @@ scrape_configs:
         target_label: __address__
       - { source_labels: [__meta_kubernetes_namespace], target_label: namespace }
       - { source_labels: [__meta_kubernetes_pod_name], target_label: pod }
-      - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version], target_label: version }
+      - { source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_version], target_label: app_version }
