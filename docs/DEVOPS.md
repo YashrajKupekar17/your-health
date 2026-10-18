@@ -1,6 +1,6 @@
 # Running YourHealth on Kubernetes
 
-What I added on top of the [baseline](../BASELINE.md), why, and how to run it.
+What I added on top of the [baseline](../BASELINE.md), why, and how to run it. Proof that it works: [EVIDENCE.md](EVIDENCE.md).
 
 ## Setup
 
